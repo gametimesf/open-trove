@@ -1,0 +1,11 @@
+version: "2"
+linters:
+  default: standard
+  exclusions:
+    rules:
+      - linters: [errcheck]
+        path: _test\.go
+      - linters: [staticcheck]
+        path: _test\.go
+      - linters: [errcheck]
+        text: "Error return value of .*(Close|Execute|Encode|Fprint|Seek|Write|Copy).*is not checked"

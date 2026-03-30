@@ -1,0 +1,8 @@
+port: "8080"
+
+store:
+  type: s3
+  s3:
+    bucket: "trove-uploads-development"
+    endpoint: "http://localhost:9000"
+    region: "us-east-1"

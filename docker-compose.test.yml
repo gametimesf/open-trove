@@ -1,0 +1,4 @@
+services:
+  minio:
+    tmpfs:
+      - /data

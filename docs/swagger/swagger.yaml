@@ -1,0 +1,249 @@
+basePath: /
+definitions:
+  cmd_server.AgentEndpoint:
+    properties:
+      content_type:
+        example: multipart/form-data
+        type: string
+      description:
+        example: Upload a file. Returns a shareable URL.
+        type: string
+      example:
+        type: string
+      method:
+        example: POST
+        type: string
+      parameters:
+        items:
+          $ref: '#/definitions/cmd_server.AgentEndpointParam'
+        type: array
+      path:
+        example: /upload
+        type: string
+      response_example:
+        $ref: '#/definitions/cmd_server.UploadResponse'
+    type: object
+  cmd_server.AgentEndpointParam:
+    properties:
+      description:
+        example: The file to upload
+        type: string
+      name:
+        example: file
+        type: string
+      required:
+        example: true
+        type: boolean
+      type:
+        example: file
+        type: string
+    type: object
+  cmd_server.AgentJSON:
+    properties:
+      api_base:
+        example: http://localhost:8080
+        type: string
+      description:
+        example: File sharing service. Upload any file, get a shareable link.
+        type: string
+      endpoints:
+        items:
+          $ref: '#/definitions/cmd_server.AgentEndpoint'
+        type: array
+      name:
+        example: trove
+        type: string
+    type: object
+  cmd_server.ErrorResponse:
+    properties:
+      error:
+        example: slug already taken
+        type: string
+    type: object
+  cmd_server.HealthResponse:
+    properties:
+      status:
+        example: ok
+        type: string
+    type: object
+  cmd_server.UploadResponse:
+    properties:
+      slug:
+        example: my-report
+        type: string
+      url:
+        example: http://localhost:8080/my-report
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: File sharing service. Upload any file, get a shareable link.
+  title: Trove API
+  version: "1.0"
+paths:
+  /:
+    get:
+      description: Renders the file upload page
+      produces:
+      - text/html
+      responses:
+        "200":
+          description: HTML upload page
+          schema:
+            type: string
+      summary: Upload page
+      tags:
+      - ui
+  /.well-known/agent.json:
+    get:
+      description: Returns structured JSON metadata for AI agent integration
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/cmd_server.AgentJSON'
+      summary: Agent discovery metadata
+      tags:
+      - discovery
+  /{slug}:
+    get:
+      description: Renders an HTML viewer for the uploaded file (markdown, code, images,
+        CSV, HTML, etc.)
+      parameters:
+      - description: File slug
+        in: path
+        name: slug
+        required: true
+        type: string
+      produces:
+      - text/html
+      responses:
+        "200":
+          description: HTML viewer page
+          schema:
+            type: string
+        "404":
+          description: File not found
+          schema:
+            type: string
+      summary: View a file
+      tags:
+      - files
+  /{slug}/raw:
+    get:
+      description: Returns the raw file content with its original content type. Supports
+        Range requests.
+      parameters:
+      - description: File slug
+        in: path
+        name: slug
+        required: true
+        type: string
+      - description: HTTP Range header for partial content
+        in: header
+        name: Range
+        type: string
+      responses:
+        "200":
+          description: File content
+          schema:
+            type: file
+        "206":
+          description: Partial file content
+          schema:
+            type: file
+        "404":
+          description: File not found
+          schema:
+            type: string
+      summary: Download raw file
+      tags:
+      - files
+  /healthz:
+    get:
+      description: Returns service health status
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/cmd_server.HealthResponse'
+      summary: Health check
+      tags:
+      - health
+  /llms.txt:
+    get:
+      description: Returns plain-text API documentation for LLM and agent consumption
+      produces:
+      - text/plain
+      responses:
+        "200":
+          description: Plain-text API docs
+          schema:
+            type: string
+      summary: LLM-friendly API documentation
+      tags:
+      - discovery
+  /mine:
+    get:
+      description: Shows the current user's upload and view history
+      produces:
+      - text/html
+      responses:
+        "200":
+          description: HTML activity page
+          schema:
+            type: string
+      summary: User activity dashboard
+      tags:
+      - ui
+  /upload:
+    post:
+      consumes:
+      - multipart/form-data
+      description: Upload a file and get a shareable link. Supports custom slugs and
+        overwriting existing files.
+      parameters:
+      - description: File to upload
+        in: formData
+        name: file
+        required: true
+        type: file
+      - description: Custom URL slug (lowercase alphanumeric and hyphens, 1-64 chars)
+        in: formData
+        name: slug
+        type: string
+      - description: Set to 'true' to replace an existing file at the same slug
+        in: formData
+        name: overwrite
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/cmd_server.UploadResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+        "409":
+          description: Slug already taken
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+      summary: Upload a file
+      tags:
+      - files
+schemes:
+- https
+- http
+swagger: "2.0"

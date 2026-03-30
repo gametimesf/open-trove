@@ -1,0 +1,419 @@
+{
+    "openapi": "3.0.0",
+    "info": {
+        "description": "File sharing service. Upload any file, get a shareable link.",
+        "title": "Trove API",
+        "contact": {},
+        "version": "1.0"
+    },
+    "paths": {
+        "/": {
+            "get": {
+                "description": "Renders the file upload page",
+                "tags": [
+                    "ui"
+                ],
+                "summary": "Upload page",
+                "responses": {
+                    "200": {
+                        "description": "HTML upload page",
+                        "content": {
+                            "text/html": {
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/.well-known/agent.json": {
+            "get": {
+                "description": "Returns structured JSON metadata for AI agent integration",
+                "tags": [
+                    "discovery"
+                ],
+                "summary": "Agent discovery metadata",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/cmd_server.AgentJSON"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/healthz": {
+            "get": {
+                "description": "Returns service health status",
+                "tags": [
+                    "health"
+                ],
+                "summary": "Health check",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/cmd_server.HealthResponse"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/llms.txt": {
+            "get": {
+                "description": "Returns plain-text API documentation for LLM and agent consumption",
+                "tags": [
+                    "discovery"
+                ],
+                "summary": "LLM-friendly API documentation",
+                "responses": {
+                    "200": {
+                        "description": "Plain-text API docs",
+                        "content": {
+                            "text/plain": {
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/mine": {
+            "get": {
+                "description": "Shows the current user's upload and view history",
+                "tags": [
+                    "ui"
+                ],
+                "summary": "User activity dashboard",
+                "responses": {
+                    "200": {
+                        "description": "HTML activity page",
+                        "content": {
+                            "text/html": {
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/upload": {
+            "post": {
+                "description": "Upload a file and get a shareable link. Supports custom slugs and overwriting existing files.",
+                "tags": [
+                    "files"
+                ],
+                "summary": "Upload a file",
+                "requestBody": {
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "file": {
+                                        "description": "File to upload",
+                                        "type": "string",
+                                        "format": "binary"
+                                    },
+                                    "slug": {
+                                        "description": "Custom URL slug (lowercase alphanumeric and hyphens, 1-64 chars)",
+                                        "type": "string"
+                                    },
+                                    "overwrite": {
+                                        "description": "Set to 'true' to replace an existing file at the same slug",
+                                        "type": "string"
+                                    }
+                                },
+                                "required": [
+                                    "file"
+                                ]
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/cmd_server.UploadResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/cmd_server.ErrorResponse"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Slug already taken",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/cmd_server.ErrorResponse"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/cmd_server.ErrorResponse"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/{slug}": {
+            "get": {
+                "description": "Renders an HTML viewer for the uploaded file (markdown, code, images, CSV, HTML, etc.)",
+                "tags": [
+                    "files"
+                ],
+                "summary": "View a file",
+                "parameters": [
+                    {
+                        "description": "File slug",
+                        "name": "slug",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "HTML viewer page",
+                        "content": {
+                            "text/html": {
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "File not found",
+                        "content": {
+                            "text/html": {
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/{slug}/raw": {
+            "get": {
+                "description": "Returns the raw file content with its original content type. Supports Range requests.",
+                "tags": [
+                    "files"
+                ],
+                "summary": "Download raw file",
+                "parameters": [
+                    {
+                        "description": "File slug",
+                        "name": "slug",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "HTTP Range header for partial content",
+                        "name": "Range",
+                        "in": "header",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "File content",
+                        "content": {
+                            "*/*": {
+                                "schema": {
+                                    "type": "string",
+                                    "format": "binary"
+                                }
+                            }
+                        }
+                    },
+                    "206": {
+                        "description": "Partial file content",
+                        "content": {
+                            "*/*": {
+                                "schema": {
+                                    "type": "string",
+                                    "format": "binary"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "File not found",
+                        "content": {
+                            "*/*": {
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "servers": [
+        {
+            "url": "https://localhost:8080"
+        },
+        {
+            "url": "http://localhost:8080"
+        }
+    ],
+    "components": {
+        "schemas": {
+            "cmd_server.AgentEndpoint": {
+                "type": "object",
+                "properties": {
+                    "content_type": {
+                        "type": "string",
+                        "example": "multipart/form-data"
+                    },
+                    "description": {
+                        "type": "string",
+                        "example": "Upload a file. Returns a shareable URL."
+                    },
+                    "example": {
+                        "type": "string"
+                    },
+                    "method": {
+                        "type": "string",
+                        "example": "POST"
+                    },
+                    "parameters": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/cmd_server.AgentEndpointParam"
+                        }
+                    },
+                    "path": {
+                        "type": "string",
+                        "example": "/upload"
+                    },
+                    "response_example": {
+                        "$ref": "#/components/schemas/cmd_server.UploadResponse"
+                    }
+                }
+            },
+            "cmd_server.AgentEndpointParam": {
+                "type": "object",
+                "properties": {
+                    "description": {
+                        "type": "string",
+                        "example": "The file to upload"
+                    },
+                    "name": {
+                        "type": "string",
+                        "example": "file"
+                    },
+                    "required": {
+                        "type": "boolean",
+                        "example": true
+                    },
+                    "type": {
+                        "type": "string",
+                        "example": "file"
+                    }
+                }
+            },
+            "cmd_server.AgentJSON": {
+                "type": "object",
+                "properties": {
+                    "api_base": {
+                        "type": "string",
+                        "example": "https://trove.labs.staging.gteng.co"
+                    },
+                    "description": {
+                        "type": "string",
+                        "example": "File sharing service. Upload any file, get a shareable link."
+                    },
+                    "endpoints": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/cmd_server.AgentEndpoint"
+                        }
+                    },
+                    "name": {
+                        "type": "string",
+                        "example": "trove"
+                    }
+                }
+            },
+            "cmd_server.ErrorResponse": {
+                "type": "object",
+                "properties": {
+                    "error": {
+                        "type": "string",
+                        "example": "slug already taken"
+                    }
+                }
+            },
+            "cmd_server.HealthResponse": {
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "example": "ok"
+                    }
+                }
+            },
+            "cmd_server.UploadResponse": {
+                "type": "object",
+                "properties": {
+                    "slug": {
+                        "type": "string",
+                        "example": "my-report"
+                    },
+                    "url": {
+                        "type": "string",
+                        "example": "https://trove.labs.staging.gteng.co/my-report"
+                    }
+                }
+            }
+        }
+    }
+}

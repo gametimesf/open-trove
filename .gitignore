@@ -1,0 +1,37 @@
+**/__pycache__/
+bin/
+/server
+
+# Terragrunt / terraform
+bin/
+*.cover
+*.tgz
+
+# Local .terraform directories
+**/.terraform/*
+
+# .tfstate files
+*.tfstate
+*.tfstate.*
+
+# Terraform lock files
+.terraform.lock.hcl
+
+# Crash log files
+crash.log
+crash.*.log
+
+# May contain sensitive data
+*.tfvars
+*.tfvars.json
+
+# In case tf plan outputs are saved
+*tfplan*
+
+# Ignore CLI configuration files
+.terraformrc
+terraform.rc
+
+# Terragrunt auto generated files
+**/environments/**/default_*.tf
+backend.tf
