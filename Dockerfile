@@ -4,11 +4,7 @@
 FROM golang:1.26-alpine AS builder
 WORKDIR /app
 
-# System deps first (layer stays cached regardless of GOPRIVATE value)
 RUN apk add --no-cache git
-
-# Private modules (if needed)
-# No private modules needed
 
 # Deps first for layer caching
 COPY go.mod go.sum ./

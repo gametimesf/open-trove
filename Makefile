@@ -1,7 +1,6 @@
 .PHONY: test build run watch clean lint docs integration-test test-all
 
 BINARY=server
-# GOPRIVATE not needed for public repo
 
 # ─── Docker-based (primary) ─────────────────────────────────────
 run:

@@ -454,11 +454,14 @@ func runMCP(baseURL string) bool {
 			return nil
 		}},
 		{"confirm deleted via MCP", func() error {
-			_, err := c.callTool("GET_slug_raw", map[string]any{"slug": slug})
-			if err == nil {
-				return fmt.Errorf("expected error for deleted slug")
+			text, err := c.callTool("GET_slug_raw", map[string]any{"slug": slug})
+			if err != nil {
+				return nil // error means it properly rejected — good
 			}
-			return nil
+			if strings.Contains(strings.ToLower(text), "not found") || strings.Contains(text, "404") {
+				return nil // 404 wrapped as content — also fine
+			}
+			return fmt.Errorf("expected error or not-found for deleted slug, got: %s", text[:min(len(text), 100)])
 		}},
 	})
 }
