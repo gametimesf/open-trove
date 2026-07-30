@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/gametimesf/open-trove/compare/open-trove-v1.0.0...open-trove-v1.0.1) (2026-07-30)
+
+
+### Bug Fixes
+
+* pin GitHub Actions dependencies ([#3](https://github.com/gametimesf/open-trove/issues/3)) ([1a76b5b](https://github.com/gametimesf/open-trove/commit/1a76b5b9b604420dae1a8953f13a524b03e45150))
+
 ## 1.0.0 (2026-07-30)
 
 
