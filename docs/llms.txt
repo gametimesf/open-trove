@@ -1,0 +1,217 @@
+# Trove
+> File sharing service. Upload any file, get a shareable link.
+
+## API
+
+Set `TROVE_BASE_URL` to your Trove deployment:
+
+    export TROVE_BASE_URL="http://localhost:8080"
+
+### User attribution
+Send X-Trove-User-Email on every API or agent request so both reads and writes
+are attributed. It is required for POST, PUT, PATCH, and DELETE requests. Trove
+uses the email for audit attribution only; it does not grant access.
+
+### Upload a file
+POST /upload
+Content-Type: multipart/form-data
+
+Parameters:
+- file (required): The file to upload (.html, .md, .zip, images, code, etc.)
+- slug (optional): Custom URL slug (lowercase alphanumeric and hyphens, 1-64 chars)
+- overwrite (optional): Set to "true" to replace an existing file at the same slug
+
+Headers:
+- X-Trove-User-Email (required for writes): Email used for audit attribution.
+  Trove's browser UI prompts once, caches the email locally, and sends this
+  header automatically. API and agent clients must provide it explicitly on
+  every request.
+
+Response (JSON):
+- url: The shareable URL for the uploaded file
+- slug: The slug assigned to the file
+- type: "site" when a ZIP was uploaded as a multi-page website
+
+Example (single file):
+
+    curl -X POST "$TROVE_BASE_URL/upload" \
+      -H "X-Trove-User-Email: you@example.com" \
+      -F file=@report.html -F slug=my-report
+
+Example (multi-page website from ZIP):
+
+    zip -r site.zip my-site/
+    curl -X POST "$TROVE_BASE_URL/upload" \
+      -H "X-Trove-User-Email: you@example.com" \
+      -F file=@site.zip -F slug=my-site
+
+### Upload a multi-page website
+Upload a ZIP file containing an index.html at the root. Trove serves it as a full
+multi-page website — relative links between pages and assets work automatically.
+A single top-level directory inside the ZIP is stripped automatically.
+
+Requirements:
+- ZIP must contain index.html at the root (or inside a single top-level directory)
+- All pages and assets (CSS, JS, images) should use relative paths
+
+### View a file
+GET /{slug}
+Returns an HTML page that renders the file (markdown, code, images, CSV, HTML, etc.)
+For multi-page sites, returns the site viewer with index.html loaded in an iframe.
+
+### Navigate a multi-page site page
+GET /{slug}?page=path/to/page.html
+Loads a specific page within an uploaded multi-page site. The URL updates as you
+navigate, so any page can be linked or shared directly.
+
+### Serve a site asset
+GET /{slug}/{path}
+Returns a raw file from within an uploaded multi-page site (HTML, CSS, JS, images).
+
+### Download raw file
+GET /{slug}/raw
+Returns the raw file content with its original content type (single-file uploads only).
+
+## Comments
+
+Every Trove viewer supports persistent, collapsible comment threads, including
+files that were uploaded before comments were introduced. A root comment may
+apply to the whole file, an element, or selected text. Threads support replies,
+editing, deletion, resolution, reopening, and viewing resolved threads. The
+browser viewer provides the comment UI; API and agent clients can use the
+endpoints directly.
+
+The supplied email is manually asserted audit attribution, not verified
+authentication. Trove compares it to the original author email before allowing
+edit or delete, but that comparison is an ownership convenience rather than a
+security boundary. Any identified writer can reply, resolve, or reopen.
+
+### List comment threads
+GET /api/artifacts/{slug}/comments
+
+Query parameters:
+- path (optional): Current page path inside a multi-page site, such as
+  index.html or reports/summary.html. The response includes threads for that
+  page plus whole-artifact threads.
+- resolved (optional): open (default), include, or only.
+
+Headers:
+- X-Trove-User-Email: Send on reads when available for audit attribution.
+
+Response:
+- threads: Newest-first array. Each item contains root and oldest-first replies.
+- open_thread_count: Number of open threads in the response.
+- current_version: Storage version of the current file or site page.
+- resource: Normalized multi-page site path, when applicable.
+
+Example:
+
+    curl "$TROVE_BASE_URL/api/artifacts/my-report/comments" \
+      -H "X-Trove-User-Email: you@example.com"
+
+### Create a comment thread
+POST /api/artifacts/{slug}/comments
+Content-Type: application/json
+
+Headers:
+- X-Trove-User-Email (required): The server uses this as the comment author.
+  Do not put author_email in the JSON body.
+
+Anchor types:
+- file: Whole-file or whole-page comment.
+- element: HTML or rendered-view element, identified by stable_id or selector.
+- text: Highlighted text, identified by quote.exact and optional surrounding
+  quote.prefix and quote.suffix.
+
+Whole-file example:
+
+    curl -X POST "$TROVE_BASE_URL/api/artifacts/my-report/comments" \
+      -H "X-Trove-User-Email: you@example.com" \
+      -H "Content-Type: application/json" \
+      -d '{"body":"Please add the source date.","anchor":{"type":"file"}}'
+
+HTML element example:
+
+    curl -X POST "$TROVE_BASE_URL/api/artifacts/my-report/comments" \
+      -H "X-Trove-User-Email: you@example.com" \
+      -H "Content-Type: application/json" \
+      -d '{"body":"Make this chart larger.","anchor":{"type":"element","stable_id":"revenue-chart","selector":"[data-trove-id=\"revenue-chart\"]","label":"Revenue chart"}}'
+
+Multi-page site comments include the page in anchor.resource:
+
+    {"body":"Clarify this heading.","anchor":{"type":"text","resource":"reports/summary.html","quote":{"exact":"Quarterly summary","prefix":"Results — ","suffix":" for FY26"}}}
+
+The response root contains id and thread_id. Use the root id for replies and
+thread resolution.
+
+### Reply to a thread
+POST /api/artifacts/{slug}/comments/{root_comment_id}/replies
+Content-Type: application/json
+
+For a multi-page site, also send path as a query parameter.
+
+    curl -X POST "$TROVE_BASE_URL/api/artifacts/my-report/comments/$ROOT_ID/replies" \
+      -H "X-Trove-User-Email: you@example.com" \
+      -H "Content-Type: application/json" \
+      -d '{"body":"Updated the chart source."}'
+
+Replies are rejected while a thread is resolved. Reopen it first.
+
+### Edit a comment or reply
+PATCH /api/artifacts/{slug}/comments/{comment_id}
+Content-Type: application/json
+
+The X-Trove-User-Email value must match the comment's original author email.
+
+    curl -X PATCH "$TROVE_BASE_URL/api/artifacts/my-report/comments/$COMMENT_ID" \
+      -H "X-Trove-User-Email: you@example.com" \
+      -H "Content-Type: application/json" \
+      -d '{"body":"Corrected comment text."}'
+
+### Delete a comment or reply
+DELETE /api/artifacts/{slug}/comments/{comment_id}
+
+The X-Trove-User-Email value must match the original author email. Deleting a
+root with replies leaves a body-free tombstone so the replies remain threaded;
+an empty deleted thread disappears.
+
+### Resolve or reopen a thread
+PATCH /api/artifacts/{slug}/comments/{root_comment_id}/resolution
+Content-Type: application/json
+
+Any identified writer may resolve or reopen:
+
+    curl -X PATCH "$TROVE_BASE_URL/api/artifacts/my-report/comments/$ROOT_ID/resolution" \
+      -H "X-Trove-User-Email: you@example.com" \
+      -H "Content-Type: application/json" \
+      -d '{"resolved":true}'
+
+Use false to reopen. List with resolved=include or resolved=only to view
+resolved threads.
+
+### Author HTML with durable comment anchors
+
+No special markup is required: Trove falls back to semantic labels and CSS
+selectors, so existing HTML is immediately commentable. For anchors that
+survive recurring overwrites, add stable metadata to meaningful components and
+text regions:
+
+    <section
+      data-trove-id="revenue-chart"
+      data-trove-label="Quarterly revenue chart">
+      ...
+    </section>
+
+Rules:
+- data-trove-id must be unique within one page.
+- Keep the same data-trove-id when regenerating or overwriting the artifact.
+- Put IDs on meaningful components or text regions, not every nested span.
+- data-trove-label is optional human-readable context shown in the drawer.
+- Add data-trove-comment-ignore to transient chrome or controls that should not
+  be selectable.
+- Semantic HTML, ordinary id attributes, labels, ARIA labels, headings, and
+  visible text improve fallback anchors.
+
+### Agent metadata
+GET /.well-known/agent.json
+Returns structured JSON metadata for agent integration.

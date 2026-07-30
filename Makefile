@@ -55,8 +55,6 @@ docs:
 	test -f ./docs/swagger/docs.go
 	@echo "Converting Swagger v2 to OpenAPI v3..."
 	npx --yes swagger2openapi ./docs/swagger/swagger.json -o ./docs/openapi.json --patch
-	@echo "Generating package READMEs..."
-	go generate ./...
 	@echo "Documentation generation complete."
 
 clean:

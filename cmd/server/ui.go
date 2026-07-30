@@ -47,7 +47,7 @@ const uploadPageHTML = `<!DOCTYPE html>
   </div>
   <form id="upload-form" enctype="multipart/form-data">
     <div class="drop-zone" id="drop-zone">
-      <p>Drop a file here or click to browse</p>
+      <p>Drop a file or ZIP website here, or click to browse</p>
       <input type="file" name="file" id="file-input" style="display:none">
     </div>
     <div class="file-info" id="file-info"></div>
@@ -64,6 +64,7 @@ const uploadPageHTML = `<!DOCTYPE html>
     </div>
   </div>
 </div>
+<script src="/identity.js"></script>
 <script>
   const dropZone = document.getElementById('drop-zone');
   const fileInput = document.getElementById('file-input');
@@ -157,6 +158,7 @@ var viewerTemplate = template.Must(template.New("viewer").Parse(`<!DOCTYPE html>
 <meta property="og:site_name" content="trove">
 <meta property="og:type" content="website">
 <meta property="og:url" content="{{.BaseURL}}/{{.Slug}}">
+<link rel="stylesheet" href="/_trove/comments.css">
 {{if eq .ViewMode "code"}}<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github.min.css">{{end}}
 {{if eq .ViewMode "markdown"}}<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.8.1/github-markdown-light.min.css">{{end}}
 <style>
@@ -197,14 +199,57 @@ var viewerTemplate = template.Must(template.New("viewer").Parse(`<!DOCTYPE html>
   .docx-container .docx-loading { padding: 40px; text-align: center; color: #888; }
   .video-container { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; }
   .video-container video { max-width: 100%; max-height: 100%; }
+  .intake-veil { position: fixed; inset: 0; z-index: 9999; backdrop-filter: blur(28px); -webkit-backdrop-filter: blur(28px); background: rgba(183, 28, 28, 0.18); display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .intake-modal { background: #fff; border: 3px solid #b71c1c; border-radius: 16px; padding: 40px 44px; max-width: 600px; width: 100%; text-align: center; box-shadow: 0 12px 60px rgba(0,0,0,0.35); }
+  .intake-modal .siren { font-size: 56px; line-height: 1; margin-bottom: 14px; }
+  .intake-modal h1 { font-size: 24px; color: #b71c1c; margin: 0 0 12px 0; font-weight: 700; }
+  .intake-modal .lede { color: #333; font-size: 15px; line-height: 1.45; margin-bottom: 14px; }
+  .intake-modal .reassure { color: #555; font-size: 13px; line-height: 1.45; margin: 16px 0 20px 0; font-style: italic; }
+  .intake-modal blockquote { font-size: 13px; color: #555; border-left: 4px solid #b71c1c; background: #fff5f5; padding: 12px 14px; margin: 16px 0; text-align: left; border-radius: 0 6px 6px 0; }
+  .intake-modal .cta { display: inline-block; background: #b71c1c; color: #fff; padding: 14px 28px; border-radius: 8px; text-decoration: none; font-size: 15px; font-weight: 600; margin-top: 8px; box-shadow: 0 2px 8px rgba(183,28,28,0.3); }
+  .intake-modal .cta:hover { background: #8e1414; }
+  .intake-modal .escape { display: block; margin-top: 22px; font-size: 12px; color: #999; text-decoration: underline; cursor: pointer; }
+  .intake-modal .escape:hover { color: #666; }
 </style>
 </head>
-<body>
+<body data-trove-slug="{{.Slug}}" data-trove-resource="" data-trove-view-mode="{{.ViewMode}}">
+<script src="/identity.js"></script>
 <div class="topbar">
   <span class="filename">{{.Filename}}</span>
-  <a href="{{.RawURL}}" download="{{.DownloadName}}">Download</a>
+  <div class="trove-topbar-actions" data-trove-comments-ui>
+    <button type="button" id="trove-comments-toggle" class="trove-comments-toggle" aria-controls="trove-comments-drawer" aria-expanded="false">
+      Comments <span id="trove-comments-count" class="trove-comments-count">0</span>
+    </button>
+    <a href="{{.RawURL}}" download="{{.DownloadName}}">Download</a>
+  </div>
 </div>
-<div class="content">
+{{if .Flagged}}
+<div class="intake-veil" id="intake-veil">
+  <div class="intake-modal">
+    <div class="siren">🚨</div>
+    <h1>Sensitive content detected</h1>
+    <p class="lede">This file was flagged by automated review and <strong>should not be in Trove</strong>.</p>
+    {{if .FlagReason}}<blockquote>{{.FlagReason}}</blockquote>{{end}}
+    <p class="lede">Please <strong>report this to {{.ReviewName}}</strong> so it can be reviewed or removed.</p>
+    <p class="reassure">The attribution recorded with the upload can help the administrator contact its author and suggest a safer place to share it.</p>
+    {{if .ReviewMailto}}<a class="cta" href="{{.ReviewMailto}}">📧 Report to {{.ReviewName}}</a>{{end}}
+    <a class="escape" id="intake-escape" href="#">acknowledge risk and view anyway →</a>
+  </div>
+</div>
+<script>
+(function() {
+  var esc = document.getElementById('intake-escape');
+  esc.addEventListener('click', function(e) {
+    e.preventDefault();
+    if (!confirm("This file was flagged as sensitive content that should not be in Trove. Are you sure you want to view it?")) return;
+    if (!confirm("Final confirmation: by viewing this content, you acknowledge it may contain HR, executive, customer-PII, or otherwise restricted information. Continue?")) return;
+    document.getElementById('intake-veil').style.display = 'none';
+  });
+})();
+</script>
+{{end}}
+<div class="trove-workspace">
+<div class="content" id="trove-content">
 {{if eq .ViewMode "iframe"}}
   <iframe src="{{.RawURL}}" sandbox="allow-scripts allow-popups allow-same-origin allow-top-navigation-by-user-activation"></iframe>
 {{else if eq .ViewMode "image"}}
@@ -241,6 +286,33 @@ var viewerTemplate = template.Must(template.New("viewer").Parse(`<!DOCTYPE html>
   </div>
 {{end}}
 </div>
+<aside id="trove-comments-drawer" class="trove-comments-drawer" aria-label="Artifact comments" aria-hidden="true" data-trove-comments-ui>
+  <div class="trove-comments-drawer__inner">
+    <div class="trove-comments-drawer__header">
+      <span class="trove-comments-drawer__title">Comments</span>
+      <button type="button" id="trove-comments-close" class="trove-comments-close" aria-label="Close comments">×</button>
+    </div>
+    <p class="trove-comment-mode-note">Select an element or highlight text, then leave a comment. Clear the selection to comment on the whole file.</p>
+    <form id="trove-comment-form" class="trove-comment-form">
+      <div class="trove-comment-target">
+        <span id="trove-comment-target-label" class="trove-comment-target-label">Whole file</span>
+        <button type="button" id="trove-comment-target-reset" class="trove-comment-target-reset" hidden>Clear</button>
+      </div>
+      <textarea id="trove-comment-body" class="trove-comment-body" maxlength="5000" required placeholder="Leave a comment…" aria-label="Comment"></textarea>
+      <div class="trove-comment-form__actions">
+        <span id="trove-comment-status" class="trove-comment-status" aria-live="polite"></span>
+        <button type="submit" id="trove-comment-submit" class="trove-comment-submit">Post comment</button>
+      </div>
+    </form>
+    <div class="trove-comments-filter">
+      <label><input type="checkbox" id="trove-comments-show-resolved"> Show resolved threads</label>
+    </div>
+    <ol id="trove-comments-list" class="trove-comments-list"></ol>
+  </div>
+</aside>
+</div>
+<div id="trove-comment-hover-box" class="trove-comment-hover-box" data-trove-comments-ui hidden></div>
+<div id="trove-comment-anchor-box" class="trove-comment-anchor-box" data-trove-comments-ui hidden></div>
 {{if eq .ViewMode "csv"}}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script>
@@ -353,6 +425,7 @@ var viewerTemplate = template.Must(template.New("viewer").Parse(`<!DOCTYPE html>
 })();
 </script>
 {{end}}
+<script src="/_trove/comments.js"></script>
 </body>
 </html>`))
 
@@ -462,6 +535,95 @@ var myTroveTemplate = template.Must(template.New("mytrove").Funcs(template.FuncM
     </div>
   </div>
 </div>
+<script src="/identity.js"></script>
+</body>
+</html>`))
+
+var siteViewerTemplate = template.Must(template.New("siteviewer").Parse(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Slug}} — trove</title>
+<link rel="stylesheet" href="/_trove/comments.css">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; display: flex; flex-direction: column; height: 100vh; }
+  .topbar { height: 48px; background: #fff; border-bottom: 1px solid #e0e0e0; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; flex-shrink: 0; }
+  .topbar .sitename { font-size: 14px; font-weight: 500; color: #333; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .topbar a { background: #4a90d9; color: #fff; text-decoration: none; padding: 6px 14px; border-radius: 6px; font-size: 13px; }
+  .topbar a:hover { background: #357abd; }
+  .content { flex: 1; overflow: hidden; }
+  iframe { width: 100%; height: 100%; border: none; }
+</style>
+</head>
+<body data-trove-slug="{{.Slug}}" data-trove-resource="index.html" data-trove-view-mode="site">
+<div class="topbar">
+  <span class="sitename">{{.Slug}}</span>
+  <div class="trove-topbar-actions" data-trove-comments-ui>
+    <button type="button" id="trove-comments-toggle" class="trove-comments-toggle" aria-controls="trove-comments-drawer" aria-expanded="false">
+      Comments <span id="trove-comments-count" class="trove-comments-count">0</span>
+    </button>
+    <a id="open-link" href="{{.BaseURL}}/{{.Slug}}/index.html" target="_blank">Open</a>
+  </div>
+</div>
+<div class="trove-workspace">
+<div class="content" id="trove-content">
+  <iframe id="site-frame" sandbox="allow-scripts allow-popups allow-same-origin allow-top-navigation-by-user-activation"></iframe>
+</div>
+<aside id="trove-comments-drawer" class="trove-comments-drawer" aria-label="Artifact comments" aria-hidden="true" data-trove-comments-ui>
+  <div class="trove-comments-drawer__inner">
+    <div class="trove-comments-drawer__header">
+      <span class="trove-comments-drawer__title">Comments</span>
+      <button type="button" id="trove-comments-close" class="trove-comments-close" aria-label="Close comments">×</button>
+    </div>
+    <p class="trove-comment-mode-note">Select an element or highlight text, then leave a comment. Clear the selection to comment on this page.</p>
+    <form id="trove-comment-form" class="trove-comment-form">
+      <div class="trove-comment-target">
+        <span id="trove-comment-target-label" class="trove-comment-target-label">This page</span>
+        <button type="button" id="trove-comment-target-reset" class="trove-comment-target-reset" hidden>Clear</button>
+      </div>
+      <textarea id="trove-comment-body" class="trove-comment-body" maxlength="5000" required placeholder="Leave a comment…" aria-label="Comment"></textarea>
+      <div class="trove-comment-form__actions">
+        <span id="trove-comment-status" class="trove-comment-status" aria-live="polite"></span>
+        <button type="submit" id="trove-comment-submit" class="trove-comment-submit">Post comment</button>
+      </div>
+    </form>
+    <div class="trove-comments-filter">
+      <label><input type="checkbox" id="trove-comments-show-resolved"> Show resolved threads</label>
+    </div>
+    <ol id="trove-comments-list" class="trove-comments-list"></ol>
+  </div>
+</aside>
+</div>
+<div id="trove-comment-hover-box" class="trove-comment-hover-box" data-trove-comments-ui hidden></div>
+<div id="trove-comment-anchor-box" class="trove-comment-anchor-box" data-trove-comments-ui hidden></div>
+<script src="/identity.js"></script>
+<script>
+(function() {
+  var frame = document.getElementById('site-frame');
+  var openLink = document.getElementById('open-link');
+  var slug = '{{.Slug}}';
+  var base = '{{.BaseURL}}';
+
+  var params = new URLSearchParams(window.location.search);
+  var page = params.get('page') || 'index.html';
+  frame.src = '/' + slug + '/' + page;
+
+  frame.addEventListener('load', function() {
+    try {
+      var path = frame.contentWindow.location.pathname;
+      var currentPage = path.replace('/' + slug + '/', '');
+      var newQuery = currentPage === 'index.html' ? '' : '?page=' + encodeURIComponent(currentPage);
+      history.replaceState(null, '', window.location.pathname + newQuery);
+      openLink.href = base + '/' + slug + '/' + currentPage;
+      document.body.dataset.troveResource = currentPage;
+      window.dispatchEvent(new CustomEvent('trove:resource-change', {detail: {resource: currentPage}}));
+    } catch(e) {}
+  });
+})();
+</script>
+<script src="/_trove/comments.js"></script>
 </body>
 </html>`))
 
@@ -484,5 +646,6 @@ var errorTemplate = template.Must(template.New("error").Parse(`<!DOCTYPE html>
   <h1>{{.Code}}</h1>
   <p>{{.Message}}</p>
 </div>
+<script src="/identity.js"></script>
 </body>
 </html>`))

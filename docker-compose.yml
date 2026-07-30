@@ -54,7 +54,7 @@ services:
       - ./:/app
 
   lint:
-    image: golangci/golangci-lint:v2.10-alpine
+    image: golangci/golangci-lint:v2.12.2-alpine
     working_dir: /app
     volumes:
       - ./:/app

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 	"regexp"
+	"strings"
 )
 
 const (
@@ -34,6 +35,15 @@ func generateSlug() (string, error) {
 		b[i] = slugCharset[n.Int64()]
 	}
 	return string(b), nil
+}
+
+// isInternalSlug returns true for any slug that addresses a Trove-internal
+// S3 object that must never be served back through the view path. Internal
+// keys live under prefixes that start with "_" (e.g. _users/, _sites/,
+// _comments/, and the operator-uploaded _prompt). Validated upload slugs cannot start
+// with "_" by the slug regex, so this just enforces the same rule on read.
+func isInternalSlug(slug string) bool {
+	return strings.HasPrefix(slug, "_")
 }
 
 func validateSlug(s string) error {

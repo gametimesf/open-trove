@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/zip"
 	"bytes"
 	"encoding/json"
 	"io"
@@ -10,18 +11,69 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gametimesf/open-trove/comments"
+	trovedocs "github.com/gametimesf/open-trove/docs"
+	"github.com/gametimesf/open-trove/intake"
 	"github.com/gametimesf/open-trove/storage"
 	"github.com/gametimesf/open-trove/storage/fake"
 	"github.com/labstack/echo/v4"
 )
 
+const testUserEmail = "test.user@example.com"
+
 func newTestServer() (*server, *fake.Store) {
 	store := fake.NewStore()
 	srv := &server{
-		store:   store,
-		baseURL: "http://localhost:8080",
+		store:      store,
+		comments:   comments.NewService(store),
+		baseURL:    "http://localhost:8080",
+		intake:     intake.NoOp{},
+		intakeFail: intake.FailClosed,
 	}
 	return srv, store
+}
+
+func TestRawURLFor(t *testing.T) {
+	tests := []struct {
+		name  string
+		rules []shareURLRule
+		slug  string
+		want  string
+	}{
+		{"unmatched slug stays host-relative", []shareURLRule{{slugPrefix: "partner-", baseURL: "https://proxy.example.com", pathPrefix: "/shared/trove"}}, "abc123", "/abc123/raw"},
+		{"matching slug uses alternate URL", []shareURLRule{{slugPrefix: "partner-", baseURL: "https://proxy.example.com", pathPrefix: "/shared/trove"}}, "partner-report", "https://proxy.example.com/shared/trove/partner-report/raw"},
+		{"no rules stays relative", nil, "partner-report", "/partner-report/raw"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &server{shareURLRules: tt.rules}
+			if got := s.rawURLFor(tt.slug); got != tt.want {
+				t.Errorf("rawURLFor(%q) = %q, want %q", tt.slug, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestViewURLFor(t *testing.T) {
+	tests := []struct {
+		name    string
+		baseURL string
+		rules   []shareURLRule
+		slug    string
+		want    string
+	}{
+		{"unmatched slug uses default base URL", "http://localhost:8080", []shareURLRule{{slugPrefix: "partner-", baseURL: "https://proxy.example.com", pathPrefix: "/shared/trove"}}, "abc123", "http://localhost:8080/abc123"},
+		{"matching slug uses alternate URL", "http://localhost:8080", []shareURLRule{{slugPrefix: "partner-", baseURL: "https://proxy.example.com", pathPrefix: "/shared/trove"}}, "partner-report", "https://proxy.example.com/shared/trove/partner-report"},
+		{"no rules uses default base URL", "http://localhost:8080", nil, "partner-report", "http://localhost:8080/partner-report"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &server{baseURL: tt.baseURL, shareURLRules: tt.rules}
+			if got := s.viewURLFor(tt.slug); got != tt.want {
+				t.Errorf("viewURLFor(%q) = %q, want %q", tt.slug, got, tt.want)
+			}
+		})
+	}
 }
 
 func newTestEcho(srv *server) *echo.Echo {
@@ -57,7 +109,27 @@ func createMultipartRequestWithOverwrite(t *testing.T, filename string, content 
 
 	req := httptest.NewRequest("POST", "/upload", &buf)
 	req.Header.Set("Content-Type", w.FormDataContentType())
+	req.Header.Set(troveUserEmailHeader, testUserEmail)
 	return req
+}
+
+func createZIP(t *testing.T, files map[string][]byte) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for name, content := range files {
+		entry, err := zw.Create(name)
+		if err != nil {
+			t.Fatalf("creating ZIP entry %q: %v", name, err)
+		}
+		if _, err := entry.Write(content); err != nil {
+			t.Fatalf("writing ZIP entry %q: %v", name, err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("closing ZIP: %v", err)
+	}
+	return buf.Bytes()
 }
 
 func TestHandleIndex(t *testing.T) {
@@ -122,6 +194,32 @@ func TestHandleUploadWithCustomSlug(t *testing.T) {
 	}
 }
 
+func TestHandleUploadMatchingRuleReturnsAlternateURL(t *testing.T) {
+	srv, _ := newTestServer()
+	srv.shareURLRules = []shareURLRule{{
+		slugPrefix: "partner-",
+		baseURL:    "https://proxy.example.com",
+		pathPrefix: "/shared/trove",
+	}}
+	e := newTestEcho(srv)
+
+	req := createMultipartRequest(t, "report.html", []byte("<html>hi</html>"), "partner-report")
+	w := httptest.NewRecorder()
+	e.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Errorf("expected 200, got %d; body: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]string
+	json.Unmarshal(w.Body.Bytes(), &resp)
+
+	want := "https://proxy.example.com/shared/trove/partner-report"
+	if resp["url"] != want {
+		t.Errorf("expected url %q, got %q", want, resp["url"])
+	}
+}
+
 func TestHandleUploadInvalidSlug(t *testing.T) {
 	srv, _ := newTestServer()
 	e := newTestEcho(srv)
@@ -132,6 +230,115 @@ func TestHandleUploadInvalidSlug(t *testing.T) {
 
 	if w.Code != 400 {
 		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestHandleUploadRejectsFileOverLimit(t *testing.T) {
+	srv, _ := newTestServer()
+	srv.uploads = uploadLimits{
+		maxBytes:         3,
+		maxSiteFiles:     10,
+		maxSiteBytes:     100,
+		maxSiteFileBytes: 100,
+	}
+	e := newTestEcho(srv)
+
+	req := createMultipartRequest(t, "file.txt", []byte("four"), "too-large")
+	w := httptest.NewRecorder()
+	e.ServeHTTP(w, req)
+
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleSiteUploadRejectsUnsafePath(t *testing.T) {
+	srv, _ := newTestServer()
+	e := newTestEcho(srv)
+	archive := createZIP(t, map[string][]byte{
+		"index.html": []byte("<h1>site</h1>"),
+		"../oops.js": []byte("alert(1)"),
+	})
+
+	req := createMultipartRequest(t, "site.zip", archive, "unsafe-site")
+	w := httptest.NewRecorder()
+	e.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleSiteUploadRejectsExpansionLimits(t *testing.T) {
+	tests := []struct {
+		name   string
+		limits uploadLimits
+		files  map[string][]byte
+	}{
+		{
+			name:   "too many files",
+			limits: uploadLimits{maxBytes: 1 << 20, maxSiteFiles: 1, maxSiteBytes: 1 << 20, maxSiteFileBytes: 1 << 20},
+			files: map[string][]byte{
+				"index.html": []byte("<h1>site</h1>"),
+				"app.js":     []byte("ok"),
+			},
+		},
+		{
+			name:   "single entry too large",
+			limits: uploadLimits{maxBytes: 1 << 20, maxSiteFiles: 10, maxSiteBytes: 1 << 20, maxSiteFileBytes: 8},
+			files: map[string][]byte{
+				"index.html": []byte("<h1>site</h1>"),
+			},
+		},
+		{
+			name:   "expanded archive too large",
+			limits: uploadLimits{maxBytes: 1 << 20, maxSiteFiles: 10, maxSiteBytes: 15, maxSiteFileBytes: 15},
+			files: map[string][]byte{
+				"index.html": []byte("<h1>x</h1>"),
+				"app.js":     []byte("123456"),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv, _ := newTestServer()
+			srv.uploads = tt.limits
+			e := newTestEcho(srv)
+			req := createMultipartRequest(t, "site.zip", createZIP(t, tt.files), "limited-site")
+			w := httptest.NewRecorder()
+			e.ServeHTTP(w, req)
+			if w.Code != http.StatusRequestEntityTooLarge {
+				t.Fatalf("expected 413, got %d: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestSafeSitePath(t *testing.T) {
+	tests := []struct {
+		name, path, prefix, want string
+		wantErr                  bool
+	}{
+		{name: "plain", path: "assets/app.js", want: "assets/app.js"},
+		{name: "strip top directory", path: "site/index.html", prefix: "site/", want: "index.html"},
+		{name: "parent traversal", path: "../secret", wantErr: true},
+		{name: "absolute", path: "/etc/passwd", wantErr: true},
+		{name: "windows separator", path: `assets\app.js`, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := safeSitePath(tt.path, tt.prefix)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got %q", got)
+				}
+				return
+			}
+			if err != nil || got != tt.want {
+				t.Fatalf("safeSitePath() = %q, %v; want %q", got, err, tt.want)
+			}
+		})
 	}
 }
 
@@ -187,6 +394,7 @@ func TestHandleUploadNoFile(t *testing.T) {
 
 	req := httptest.NewRequest("POST", "/upload", strings.NewReader(""))
 	req.Header.Set("Content-Type", "multipart/form-data; boundary=xxx")
+	req.Header.Set(troveUserEmailHeader, testUserEmail)
 	w := httptest.NewRecorder()
 	e.ServeHTTP(w, req)
 
@@ -453,6 +661,9 @@ func TestUploadRecordsActivity(t *testing.T) {
 	if m.Uploads[0].Slug != "my-report" {
 		t.Errorf("expected slug 'my-report', got %q", m.Uploads[0].Slug)
 	}
+	if m.Uploads[0].UserEmail != testUserEmail {
+		t.Errorf("expected upload email %q, got %q", testUserEmail, m.Uploads[0].UserEmail)
+	}
 }
 
 func TestViewRecordsActivity(t *testing.T) {
@@ -468,6 +679,7 @@ func TestViewRecordsActivity(t *testing.T) {
 	// View as user B
 	req := httptest.NewRequest("GET", "/shared-doc", nil)
 	req.AddCookie(&http.Cookie{Name: "trove_id", Value: userB})
+	req.Header.Set(troveUserEmailHeader, testUserEmail)
 	w := httptest.NewRecorder()
 	e.ServeHTTP(w, req)
 
@@ -481,6 +693,9 @@ func TestViewRecordsActivity(t *testing.T) {
 	}
 	if m.Views[0].Slug != "shared-doc" {
 		t.Errorf("expected view slug 'shared-doc', got %q", m.Views[0].Slug)
+	}
+	if m.Views[0].UserEmail != testUserEmail {
+		t.Errorf("expected view email %q, got %q", testUserEmail, m.Views[0].UserEmail)
 	}
 }
 
@@ -1000,6 +1215,14 @@ func TestHandleAgentJSON(t *testing.T) {
 	if ep["path"] != "/upload" {
 		t.Errorf("expected path /upload, got %v", ep["path"])
 	}
+	parameters, ok := ep["parameters"].([]any)
+	if !ok || len(parameters) == 0 {
+		t.Fatal("expected upload parameters")
+	}
+	identity := parameters[0].(map[string]any)
+	if identity["name"] != troveUserEmailHeader || identity["required"] != true {
+		t.Errorf("expected required %s parameter, got %v", troveUserEmailHeader, identity)
+	}
 }
 
 func TestHandleLLMsTxt(t *testing.T) {
@@ -1017,13 +1240,24 @@ func TestHandleLLMsTxt(t *testing.T) {
 		t.Errorf("expected text/plain, got %q", ct)
 	}
 	body := w.Body.String()
-	for _, want := range []string{"# Trove", "POST /upload", "GET /{slug}", "curl"} {
+	for _, want := range []string{
+		"# Trove",
+		"POST /upload",
+		"GET /{slug}",
+		"curl",
+		"Send X-Trove-User-Email on every API or agent request",
+		"required for POST, PUT, PATCH, and DELETE requests",
+	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected body to contain %q", want)
 		}
 	}
-	if !strings.Contains(body, "http://localhost:8080") {
-		t.Errorf("expected body to contain base URL")
+	fileBody, err := trovedocs.Files.ReadFile("llms.txt")
+	if err != nil {
+		t.Fatalf("read embedded llms.txt: %v", err)
+	}
+	if !bytes.Equal(w.Body.Bytes(), fileBody) {
+		t.Error("expected response to match docs/llms.txt byte for byte")
 	}
 }
 
