@@ -1,23 +1,69 @@
 package main
 
 import (
+	"archive/zip"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"mime"
 	"net/http"
+	"net/url"
+	"path"
 	"path/filepath"
 	"strings"
 
+	"github.com/gametimesf/open-trove/comments"
+	"github.com/gametimesf/open-trove/intake"
 	"github.com/gametimesf/open-trove/storage"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 )
 
 type server struct {
-	store   storage.Store
-	baseURL string
+	store         storage.Store
+	comments      *comments.Service
+	baseURL       string
+	shareURLRules []shareURLRule
+	contentReview contentReview
+	uploads       uploadLimits
+	intake        intake.Inspector // intake.NoOp{} when feature disabled
+	intakeFail    intake.FailMode  // closed (default) or open
+}
+
+type shareURLRule struct {
+	slugPrefix string
+	baseURL    string
+	pathPrefix string
+}
+
+type contentReview struct {
+	contactName  string
+	contactEmail string
+}
+
+type uploadLimits struct {
+	maxBytes         int64
+	maxSiteFiles     int
+	maxSiteBytes     int64
+	maxSiteFileBytes int64
+}
+
+func (l uploadLimits) withDefaults() uploadLimits {
+	if l.maxBytes <= 0 {
+		l.maxBytes = 200 << 20
+	}
+	if l.maxSiteFiles <= 0 {
+		l.maxSiteFiles = 2_000
+	}
+	if l.maxSiteBytes <= 0 {
+		l.maxSiteBytes = 200 << 20
+	}
+	if l.maxSiteFileBytes <= 0 {
+		l.maxSiteFileBytes = 100 << 20
+	}
+	return l
 }
 
 const cookieMaxAge = 10 * 365 * 24 * 60 * 60 // ~10 years in seconds
@@ -107,51 +153,6 @@ var extContentTypes = map[string]string{
 	".avi":  "video/x-msvideo",
 }
 
-// handleLLMsTxt godoc
-// @Summary LLM-friendly API documentation
-// @Description Returns plain-text API documentation for LLM and agent consumption
-// @Tags discovery
-// @Produce plain
-// @Success 200 {string} string "Plain-text API docs"
-// @Router /llms.txt [get]
-func (s *server) handleLLMsTxt(c echo.Context) error {
-	return c.String(http.StatusOK, fmt.Sprintf(`# Trove
-> File sharing service. Upload any file, get a shareable link.
-
-## API
-
-Base URL: %s
-
-### Upload a file
-POST /upload
-Content-Type: multipart/form-data
-
-Parameters:
-- file (required): The file to upload
-- slug (optional): Custom URL slug (lowercase alphanumeric and hyphens, 1-64 chars)
-- overwrite (optional): Set to "true" to replace an existing file at the same slug
-
-Response (JSON):
-- url: The shareable URL for the uploaded file
-- slug: The slug assigned to the file
-
-Example:
-  curl -X POST %s/upload -F file=@report.html -F slug=my-report
-
-### View a file
-GET /{slug}
-Returns an HTML page that renders the file (markdown, code, images, CSV, HTML, etc.)
-
-### Download raw file
-GET /{slug}/raw
-Returns the raw file content with its original content type.
-
-### Agent metadata
-GET /.well-known/agent.json
-Returns structured JSON metadata for agent integration.
-`, s.baseURL, s.baseURL))
-}
-
 // handleAgentJSON godoc
 // @Summary Agent discovery metadata
 // @Description Returns structured JSON metadata for AI agent integration
@@ -171,12 +172,63 @@ func (s *server) handleAgentJSON(c echo.Context) error {
 				"description":  "Upload a file. Returns a shareable URL.",
 				"content_type": "multipart/form-data",
 				"parameters": []map[string]any{
+					{"name": troveUserEmailHeader, "type": "string", "in": "header", "required": true, "description": "Email used for audit attribution; send it on every request and note that it is required for writes"},
 					{"name": "file", "type": "file", "required": true, "description": "The file to upload"},
 					{"name": "slug", "type": "string", "required": false, "description": "Custom URL slug (lowercase alphanumeric and hyphens, 1-64 chars)"},
 					{"name": "overwrite", "type": "string", "required": false, "description": "Set to 'true' to replace an existing file at the same slug"},
 				},
-				"example":          fmt.Sprintf("curl -X POST %s/upload -F file=@report.html -F slug=my-report", s.baseURL),
+				"example":          fmt.Sprintf("curl -X POST %s/upload -H '%s: you@example.com' -F file=@report.html -F slug=my-report", s.baseURL, troveUserEmailHeader),
 				"response_example": map[string]string{"url": s.baseURL + "/my-report", "slug": "my-report"},
+			},
+			{
+				"method":      "GET",
+				"path":        "/api/artifacts/{slug}/comments",
+				"description": "List open comment threads for an artifact or site page; use resolved=include or resolved=only to view resolved threads.",
+				"parameters": []map[string]any{
+					{"name": troveUserEmailHeader, "type": "string", "in": "header", "required": false, "description": "Email used for audit attribution; send it on reads when available"},
+					{"name": "slug", "type": "string", "in": "path", "required": true, "description": "Artifact slug"},
+					{"name": "path", "type": "string", "in": "query", "required": false, "description": "Page path within a multi-page site"},
+					{"name": "resolved", "type": "string", "in": "query", "required": false, "description": "open, include, or only"},
+				},
+				"example": fmt.Sprintf("curl %s/api/artifacts/my-report/comments -H '%s: you@example.com'", s.baseURL, troveUserEmailHeader),
+			},
+			{
+				"method":       "POST",
+				"path":         "/api/artifacts/{slug}/comments",
+				"description":  "Create a whole-file, element, or text comment thread.",
+				"content_type": "application/json",
+				"parameters": []map[string]any{
+					{"name": troveUserEmailHeader, "type": "string", "in": "header", "required": true, "description": "Email used for audit attribution"},
+					{"name": "slug", "type": "string", "in": "path", "required": true, "description": "Artifact slug"},
+				},
+				"example": fmt.Sprintf("curl -X POST %s/api/artifacts/my-report/comments -H '%s: you@example.com' -H 'Content-Type: application/json' -d '{\"body\":\"Clarify this chart\",\"anchor\":{\"type\":\"element\",\"stable_id\":\"revenue-chart\"}}'", s.baseURL, troveUserEmailHeader),
+			},
+			{
+				"method":       "POST",
+				"path":         "/api/artifacts/{slug}/comments/{comment_id}/replies",
+				"description":  "Reply to an open comment thread. comment_id is the root comment ID.",
+				"content_type": "application/json",
+				"example":      fmt.Sprintf("curl -X POST %s/api/artifacts/my-report/comments/$ROOT_ID/replies -H '%s: you@example.com' -H 'Content-Type: application/json' -d '{\"body\":\"Updated.\"}'", s.baseURL, troveUserEmailHeader),
+			},
+			{
+				"method":       "PATCH",
+				"path":         "/api/artifacts/{slug}/comments/{comment_id}",
+				"description":  "Edit a comment or reply. The attribution email must match the original author.",
+				"content_type": "application/json",
+				"example":      fmt.Sprintf("curl -X PATCH %s/api/artifacts/my-report/comments/$COMMENT_ID -H '%s: you@example.com' -H 'Content-Type: application/json' -d '{\"body\":\"Corrected text.\"}'", s.baseURL, troveUserEmailHeader),
+			},
+			{
+				"method":      "DELETE",
+				"path":        "/api/artifacts/{slug}/comments/{comment_id}",
+				"description": "Delete a comment or reply. The attribution email must match the original author.",
+				"example":     fmt.Sprintf("curl -X DELETE %s/api/artifacts/my-report/comments/$COMMENT_ID -H '%s: you@example.com'", s.baseURL, troveUserEmailHeader),
+			},
+			{
+				"method":       "PATCH",
+				"path":         "/api/artifacts/{slug}/comments/{comment_id}/resolution",
+				"description":  "Resolve or reopen a root comment thread.",
+				"content_type": "application/json",
+				"example":      fmt.Sprintf("curl -X PATCH %s/api/artifacts/my-report/comments/$ROOT_ID/resolution -H '%s: you@example.com' -H 'Content-Type: application/json' -d '{\"resolved\":true}'", s.baseURL, troveUserEmailHeader),
 			},
 		},
 	})
@@ -199,6 +251,7 @@ func (s *server) handleIndex(c echo.Context) error {
 // @Tags files
 // @Accept multipart/form-data
 // @Produce json
+// @Param X-Trove-User-Email header string true "Email used for audit attribution"
 // @Param file formData file true "File to upload"
 // @Param slug formData string false "Custom URL slug (lowercase alphanumeric and hyphens, 1-64 chars)"
 // @Param overwrite formData string false "Set to 'true' to replace an existing file at the same slug"
@@ -209,10 +262,20 @@ func (s *server) handleIndex(c echo.Context) error {
 // @Router /upload [post]
 func (s *server) handleUpload(c echo.Context) error {
 	r := c.Request()
+	limits := s.uploads.withDefaults()
 
-	// 200MB max
-	if err := r.ParseMultipartForm(200 << 20); err != nil {
+	// Bound the full request as well as the selected file. The small allowance
+	// covers multipart boundaries and scalar fields.
+	r.Body = http.MaxBytesReader(c.Response(), r.Body, limits.maxBytes+(1<<20))
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "file too large or invalid multipart form"})
+	}
+	if r.MultipartForm != nil {
+		defer func() {
+			if err := r.MultipartForm.RemoveAll(); err != nil {
+				log.Printf("WARN  cleaning multipart temp files: %v", err)
+			}
+		}()
 	}
 
 	file, header, err := r.FormFile("file")
@@ -238,18 +301,37 @@ func (s *server) handleUpload(c echo.Context) error {
 
 	overwrite := c.FormValue("overwrite") == "true"
 
-	// Detect content type: extension first, then sniff, then multipart header
-	contentType := detectContentType(header.Filename, file, header.Header.Get("Content-Type"))
+	// Read a bounded copy so intake and storage can safely re-read it.
+	fileBytes, err := io.ReadAll(io.LimitReader(file, limits.maxBytes+1))
+	if err != nil {
+		log.Printf("ERROR reading upload: %v", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	}
+	if int64(len(fileBytes)) > limits.maxBytes {
+		return c.JSON(http.StatusRequestEntityTooLarge, map[string]string{"error": "file too large"})
+	}
 
-	// Reset reader after sniffing
-	if seeker, ok := file.(io.Seeker); ok {
-		seeker.Seek(0, io.SeekStart)
+	// Detect content type: extension first, then sniff, then multipart header
+	contentType := detectContentType(header.Filename, bytes.NewReader(fileBytes), header.Header.Get("Content-Type"))
+
+	// Intake gate. ZIP-as-site uploads are inspected per-file inside
+	// handleSiteUploadFromZip, so skip the whole-blob check here.
+	isZip := strings.HasSuffix(strings.ToLower(header.Filename), ".zip") || contentType == "application/zip" || contentType == "application/x-zip-compressed"
+	if !isZip {
+		if err := s.gateUpload(c, header.Filename, contentType, fileBytes); err != nil {
+			return err
+		}
+	}
+
+	// If ZIP, treat as a site upload
+	if isZip {
+		return s.handleSiteUploadFromZip(c, slug, fileBytes, userProvidedSlug, overwrite)
 	}
 
 	// Retry with new slugs on conflict (only for auto-generated slugs)
 	const maxRetries = 5
 	for attempt := 0; ; attempt++ {
-		if err := s.store.Put(r.Context(), slug, file, contentType, header.Filename, userProvidedSlug, overwrite); err != nil {
+		if err := s.store.Put(r.Context(), slug, bytes.NewReader(fileBytes), contentType, header.Filename, userProvidedSlug, overwrite); err != nil {
 			if errors.Is(err, storage.ErrSlugConflict) {
 				if userProvidedSlug {
 					return c.JSON(http.StatusConflict, map[string]string{"error": "slug already taken"})
@@ -262,10 +344,6 @@ func (s *server) handleUpload(c echo.Context) error {
 				if err != nil {
 					log.Printf("ERROR generating slug: %v", err)
 					return c.JSON(http.StatusInternalServerError, map[string]string{"error": "internal error"})
-				}
-				// Reset reader for retry
-				if seeker, ok := file.(io.Seeker); ok {
-					seeker.Seek(0, io.SeekStart)
 				}
 				continue
 			}
@@ -282,19 +360,46 @@ func (s *server) handleUpload(c echo.Context) error {
 			Slug:        slug,
 			Filename:    header.Filename,
 			ContentType: contentType,
+			UserEmail:   userEmail(c),
 		}
 		if err := s.store.RecordUpload(r.Context(), uid, rec); err != nil {
 			log.Printf("WARN  recording upload for user %s: %v", uid, err)
 		}
 	}
 
-	log.Printf("INFO  user %s uploaded slug=%s filename=%q custom_slug=%v content_type=%q", uid, slug, header.Filename, userProvidedSlug, contentType)
+	log.Printf("INFO  user_email=%q user_id=%s uploaded slug=%s filename=%q custom_slug=%v content_type=%q", userEmail(c), uid, slug, header.Filename, userProvidedSlug, contentType)
 
-	url := s.baseURL + "/" + slug
+	url := s.viewURLFor(slug)
 	return c.JSON(http.StatusOK, map[string]string{
 		"url":  url,
 		"slug": slug,
 	})
+}
+
+// rawURLFor returns the viewer's raw-content URL. Deployments can publish
+// selected slug prefixes through an alternate base URL.
+func (s *server) rawURLFor(slug string) string {
+	if rule, ok := s.shareURLRuleFor(slug); ok {
+		return rule.baseURL + rule.pathPrefix + "/" + slug + "/raw"
+	}
+	return "/" + slug + "/raw"
+}
+
+// viewURLFor returns the shareable viewer URL reported to the uploader.
+func (s *server) viewURLFor(slug string) string {
+	if rule, ok := s.shareURLRuleFor(slug); ok {
+		return rule.baseURL + rule.pathPrefix + "/" + slug
+	}
+	return s.baseURL + "/" + slug
+}
+
+func (s *server) shareURLRuleFor(slug string) (shareURLRule, bool) {
+	for _, rule := range s.shareURLRules {
+		if strings.HasPrefix(slug, rule.slugPrefix) {
+			return rule, true
+		}
+	}
+	return shareURLRule{}, false
 }
 
 // handleView godoc
@@ -308,6 +413,25 @@ func (s *server) handleUpload(c echo.Context) error {
 // @Router /{slug} [get]
 func (s *server) handleView(c echo.Context) error {
 	slug := c.Param("slug")
+	if isInternalSlug(slug) {
+		return renderError(c, http.StatusNotFound, "File not found")
+	}
+
+	// Check if this slug is a site
+	isSite, err := s.store.HeadSite(c.Request().Context(), slug)
+	if err != nil {
+		log.Printf("ERROR checking site %s: %v", slug, err)
+		return renderError(c, http.StatusInternalServerError, "Internal error")
+	}
+	if isSite {
+		uid := userID(c)
+		log.Printf("INFO  user_email=%q user_id=%s viewing site slug=%s", userEmail(c), uid, slug)
+		c.Response().Header().Set(echo.HeaderContentType, "text/html; charset=utf-8")
+		return siteViewerTemplate.Execute(c.Response(), struct {
+			Slug    string
+			BaseURL string
+		}{Slug: slug, BaseURL: s.baseURL})
+	}
 
 	meta, err := s.store.Metadata(c.Request().Context(), slug)
 	if err != nil {
@@ -320,7 +444,7 @@ func (s *server) handleView(c echo.Context) error {
 
 	// Record view in user manifest (best-effort, skip own uploads)
 	uid := userID(c)
-	log.Printf("INFO  user %s viewing slug=%s filename=%q", uid, slug, meta.Filename)
+	log.Printf("INFO  user_email=%q user_id=%s viewing slug=%s filename=%q", userEmail(c), uid, slug, meta.Filename)
 	if uid != "" {
 		manifest, err := s.store.GetManifest(c.Request().Context(), uid)
 		isOwnUpload := false
@@ -337,6 +461,7 @@ func (s *server) handleView(c echo.Context) error {
 				Slug:        slug,
 				Filename:    meta.Filename,
 				ContentType: meta.ContentType,
+				UserEmail:   userEmail(c),
 			}
 			if err := s.store.RecordView(c.Request().Context(), uid, rec); err != nil {
 				log.Printf("WARN recording view for user %s: %v", uid, err)
@@ -358,15 +483,23 @@ func (s *server) handleView(c echo.Context) error {
 		Language     string
 		BaseURL      string
 		DownloadName string
+		Flagged      bool
+		FlagReason   string
+		ReviewName   string
+		ReviewMailto string
 	}{
 		Slug:         slug,
 		Filename:     meta.Filename,
 		ContentType:  meta.ContentType,
-		RawURL:       "/" + slug + "/raw",
+		Flagged:      meta.Flagged,
+		FlagReason:   meta.FlagReason,
+		RawURL:       s.rawURLFor(slug),
 		ViewMode:     viewMode(meta.ContentType, meta.Filename),
 		Language:     highlightLang(meta.Filename),
 		BaseURL:      s.baseURL,
 		DownloadName: downloadName,
+		ReviewName:   s.reviewContactName(),
+		ReviewMailto: s.reviewMailto(slug, meta.FlagReason),
 	}
 
 	c.Response().Header().Set(echo.HeaderContentType, "text/html; charset=utf-8")
@@ -410,6 +543,9 @@ func (s *server) handleMine(c echo.Context) error {
 // @Router /{slug}/raw [get]
 func (s *server) handleRaw(c echo.Context) error {
 	slug := c.Param("slug")
+	if isInternalSlug(slug) {
+		return renderError(c, http.StatusNotFound, "File not found")
+	}
 	log.Printf("INFO  raw download slug=%s", slug)
 
 	rangeHeader := c.Request().Header.Get("Range")
@@ -442,17 +578,245 @@ func (s *server) handleRaw(c echo.Context) error {
 	return err
 }
 
+// zipSingleDirPrefix returns the directory prefix to strip when all files in a
+// ZIP share a single top-level directory (e.g. "reports/" from a macOS folder zip).
+// Returns an empty string if files are already at the root.
+func zipSingleDirPrefix(files []*zip.File) string {
+	var prefix string
+	for _, f := range files {
+		if strings.HasPrefix(f.Name, "__MACOSX/") {
+			continue
+		}
+		parts := strings.SplitN(f.Name, "/", 2)
+		if len(parts) < 2 {
+			return "" // file at root — no prefix to strip
+		}
+		dir := parts[0] + "/"
+		if prefix == "" {
+			prefix = dir
+		} else if prefix != dir {
+			return "" // multiple top-level directories
+		}
+	}
+	return prefix
+}
+
+func (s *server) handleSiteUploadFromZip(c echo.Context, slug string, zipBytes []byte, userProvidedSlug, overwrite bool) error {
+	r := c.Request()
+	limits := s.uploads.withDefaults()
+
+	zr, err := zip.NewReader(bytes.NewReader(zipBytes), int64(len(zipBytes)))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid ZIP file"})
+	}
+
+	// Detect common top-level directory prefix (e.g. macOS zips a folder as "reports/index.html").
+	// If every non-MACOSX file shares a single top-level directory, strip it so files are treated as root-level.
+	stripPrefix := zipSingleDirPrefix(zr.File)
+
+	// Validate: must have index.html after stripping prefix
+	hasIndex := false
+	for _, f := range zr.File {
+		if f.FileInfo().IsDir() || strings.HasPrefix(f.Name, "__MACOSX/") {
+			continue
+		}
+		if strings.TrimPrefix(f.Name, stripPrefix) == "index.html" {
+			hasIndex = true
+			break
+		}
+	}
+	if !hasIndex {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "ZIP must contain index.html"})
+	}
+
+	// Check for slug conflict
+	if !overwrite {
+		if exists, err := s.store.HeadSite(r.Context(), slug); err != nil {
+			log.Printf("ERROR checking site slug %s: %v", slug, err)
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		} else if exists {
+			if userProvidedSlug {
+				return c.JSON(http.StatusConflict, map[string]string{"error": "slug already taken"})
+			}
+			var genErr error
+			slug, genErr = generateSlug()
+			if genErr != nil {
+				log.Printf("ERROR generating slug: %v", genErr)
+				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "internal error"})
+			}
+		}
+	}
+
+	// Two-pass: read-and-inspect everything before persisting anything.
+	// If any file is rejected, we leave the store untouched.
+	type pendingFile struct {
+		path        string
+		contentType string
+		data        []byte
+	}
+	pending := make([]pendingFile, 0, len(zr.File))
+	var expandedBytes int64
+	for _, f := range zr.File {
+		if f.FileInfo().IsDir() || strings.HasPrefix(f.Name, "__MACOSX/") {
+			continue
+		}
+		if len(pending) >= limits.maxSiteFiles {
+			return c.JSON(http.StatusRequestEntityTooLarge, map[string]string{"error": "ZIP contains too many files"})
+		}
+		storedPath, err := safeSitePath(f.Name, stripPrefix)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("invalid ZIP entry %q", f.Name)})
+		}
+		if f.UncompressedSize64 > uint64(limits.maxSiteFileBytes) {
+			return c.JSON(http.StatusRequestEntityTooLarge, map[string]string{"error": fmt.Sprintf("ZIP entry %q is too large", f.Name)})
+		}
+		if f.UncompressedSize64 > uint64(limits.maxSiteBytes-expandedBytes) {
+			return c.JSON(http.StatusRequestEntityTooLarge, map[string]string{"error": "expanded ZIP is too large"})
+		}
+		rc, err := f.Open()
+		if err != nil {
+			log.Printf("ERROR opening zip entry %s: %v", f.Name, err)
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		}
+		data, err := io.ReadAll(io.LimitReader(rc, limits.maxSiteFileBytes+1))
+		rc.Close()
+		if err != nil {
+			log.Printf("ERROR reading zip entry %s: %v", f.Name, err)
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		}
+		if int64(len(data)) > limits.maxSiteFileBytes {
+			return c.JSON(http.StatusRequestEntityTooLarge, map[string]string{"error": fmt.Sprintf("ZIP entry %q is too large", f.Name)})
+		}
+		expandedBytes += int64(len(data))
+		if expandedBytes > limits.maxSiteBytes {
+			return c.JSON(http.StatusRequestEntityTooLarge, map[string]string{"error": "expanded ZIP is too large"})
+		}
+		ct := detectContentType(storedPath, bytes.NewReader(data), "")
+		if err := s.gateUpload(c, storedPath, ct, data); err != nil {
+			// gateUpload already wrote the response. Abort the whole site
+			// upload — first violation kills it before anything is stored.
+			return err
+		}
+		pending = append(pending, pendingFile{path: storedPath, contentType: ct, data: data})
+	}
+
+	fileCount := 0
+	for _, pf := range pending {
+		if err := s.store.PutSiteFile(r.Context(), slug, pf.path, bytes.NewReader(pf.data), pf.contentType); err != nil {
+			log.Printf("ERROR storing site file %s/%s: %v", slug, pf.path, err)
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		}
+		fileCount++
+	}
+
+	if err := s.store.PutSiteManifest(r.Context(), slug, &storage.SiteManifest{Entry: "index.html", FileCount: fileCount}); err != nil {
+		log.Printf("ERROR storing site manifest for %s: %v", slug, err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	}
+
+	uid := userID(c)
+	if uid != "" {
+		rec := storage.ActivityRecord{
+			Slug:        slug,
+			Filename:    slug,
+			ContentType: "text/html; charset=utf-8",
+			UserEmail:   userEmail(c),
+		}
+		if err := s.store.RecordUpload(r.Context(), uid, rec); err != nil {
+			log.Printf("WARN recording site upload for user %s: %v", uid, err)
+		}
+	}
+
+	log.Printf("INFO  user_email=%q user_id=%s uploaded site slug=%s files=%d custom_slug=%v", userEmail(c), uid, slug, fileCount, userProvidedSlug)
+
+	return c.JSON(http.StatusOK, map[string]string{
+		"url":  s.viewURLFor(slug),
+		"slug": slug,
+		"type": "site",
+	})
+}
+
+func safeSitePath(name, stripPrefix string) (string, error) {
+	if strings.ContainsRune(name, '\x00') || strings.Contains(name, "\\") {
+		return "", errors.New("invalid path characters")
+	}
+	value := strings.TrimPrefix(name, stripPrefix)
+	if value == "" || strings.HasPrefix(value, "/") {
+		return "", errors.New("empty or absolute path")
+	}
+	cleaned := path.Clean(value)
+	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return "", errors.New("path traversal")
+	}
+	return cleaned, nil
+}
+
+func (s *server) reviewContactName() string {
+	if name := strings.TrimSpace(s.contentReview.contactName); name != "" {
+		return name
+	}
+	return "the site administrator"
+}
+
+func (s *server) reviewMailto(slug, reason string) string {
+	email := strings.TrimSpace(s.contentReview.contactEmail)
+	if email == "" {
+		return ""
+	}
+	query := url.Values{}
+	query.Set("subject", "Content review needed in Trove: "+slug)
+	query.Set("body", fmt.Sprintf("An automated review flagged this Trove artifact. Please review it.\n\nLink: %s/%s\n\nReason: %s\n", s.baseURL, slug, reason))
+	return "mailto:" + email + "?" + query.Encode()
+}
+
+// handleSiteAsset godoc
+// @Summary Serve a site asset
+// @Description Returns a file from an uploaded multi-page site
+// @Tags files
+// @Param slug path string true "Site slug"
+// @Param path path string true "File path within the site"
+// @Success 200 {file} binary "File content"
+// @Failure 404 {string} string "Not found"
+// @Router /{slug}/{path} [get]
+func (s *server) handleSiteAsset(c echo.Context) error {
+	slug := c.Param("slug")
+	if isInternalSlug(slug) {
+		return renderError(c, http.StatusNotFound, "File not found")
+	}
+	path := c.Param("*")
+	safePath, err := safeSitePath(path, "")
+	if err != nil {
+		return renderError(c, http.StatusNotFound, "File not found")
+	}
+
+	body, meta, err := s.store.GetSiteFile(c.Request().Context(), slug, safePath)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			return renderError(c, http.StatusNotFound, "File not found")
+		}
+		log.Printf("ERROR getting site file %s/%s: %v", slug, safePath, err)
+		return renderError(c, http.StatusInternalServerError, "Internal error")
+	}
+	defer body.Close()
+
+	c.Response().Header().Set(echo.HeaderContentType, meta.ContentType)
+	_, err = io.Copy(c.Response(), body)
+	return err
+}
+
 // @Summary Delete a file
 // @Description Deletes a file by slug. This endpoint is intentionally not exposed via MCP or the UI.
 // @Tags admin
+// @Param X-Trove-User-Email header string true "Email used for audit attribution"
 // @Param slug path string true "File slug"
 // @Success 204 "Deleted"
+// @Failure 400 {object} map[string]string "Missing user email"
 // @Failure 404 {object} map[string]string "Not found"
 // @Failure 500 {object} map[string]string "Internal error"
 // @Router /delete/{slug} [delete]
 func (s *server) handleDelete(c echo.Context) error {
 	slug := c.Param("slug")
-	log.Printf("INFO  delete slug=%s", slug)
+	log.Printf("INFO  user_email=%q delete slug=%s", userEmail(c), slug)
 
 	if err := s.store.Delete(c.Request().Context(), slug); err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
@@ -460,6 +824,12 @@ func (s *server) handleDelete(c echo.Context) error {
 		}
 		log.Printf("ERROR deleting object %s: %v", slug, err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	}
+	if err := s.store.DeleteComments(c.Request().Context(), slug); err != nil {
+		// The artifact is already deleted; keep the response truthful while
+		// surfacing cleanup failure for repair instead of claiming the file
+		// remains available.
+		log.Printf("WARN deleting comments for removed object %s: %v", slug, err)
 	}
 
 	return c.NoContent(http.StatusNoContent)
@@ -514,6 +884,59 @@ func viewMode(contentType, filename string) string {
 	default:
 		return "download"
 	}
+}
+
+// errIntakeAborted is the sentinel callers see when gateUpload has
+// already written a 403 (blocked) or 503 (fail-closed inspector error)
+// to the response. They should propagate the error back through echo,
+// which will not double-write because the response is already
+// committed.
+var errIntakeAborted = errors.New("intake: response already written")
+
+// gateUpload runs the intake inspector against a file and either:
+//   - returns nil (allowed → caller proceeds with persisting)
+//   - writes a 403 JSON response and returns errIntakeAborted (blocked)
+//   - writes a 503 JSON response on inspector failure when fail-closed,
+//     also returning errIntakeAborted
+//   - returns nil on inspector failure when fail-open (logs a warning)
+//
+// Callers must propagate the returned error so the handler unwinds
+// without persisting anything; the response has already been written
+// when the error is non-nil.
+func (s *server) gateUpload(c echo.Context, filename, contentType string, body []byte) error {
+	if s.intake == nil {
+		// Defensive — main wiring guarantees a non-nil inspector (NoOp
+		// when disabled), but if a caller constructs a server directly
+		// without it, treat as no gate.
+		return nil
+	}
+	verdict, err := s.intake.Inspect(c.Request().Context(), intake.Input{
+		Filename:    filename,
+		ContentType: contentType,
+		Body:        body,
+	})
+	if err != nil {
+		log.Printf("ERROR intake inspection filename=%q content_type=%q: %v", filename, contentType, err)
+		if s.intakeFail == intake.FailOpen {
+			log.Printf("WARN  intake fail-open: allowing upload despite inspector error filename=%q", filename)
+			return nil
+		}
+		_ = c.JSON(http.StatusServiceUnavailable, map[string]string{
+			"error": "upload inspection unavailable, please retry",
+		})
+		return errIntakeAborted
+	}
+	if !verdict.Allowed {
+		log.Printf("INFO  intake blocked filename=%q content_type=%q reason=%q categories=%v",
+			filename, contentType, verdict.Reason, verdict.Categories)
+		_ = c.JSON(http.StatusForbidden, map[string]any{
+			"error":      verdict.Reason,
+			"categories": verdict.Categories,
+		})
+		return errIntakeAborted
+	}
+	log.Printf("INFO  intake allowed filename=%q content_type=%q", filename, contentType)
+	return nil
 }
 
 func renderError(c echo.Context, code int, message string) error {

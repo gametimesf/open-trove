@@ -121,6 +121,25 @@ func TestMetadataNotFound(t *testing.T) {
 	}
 }
 
+func TestHeadSiteFile(t *testing.T) {
+	store := NewStore()
+	ctx := context.Background()
+	if err := store.PutSiteFile(ctx, "site", "index.html", bytes.NewReader([]byte("<html>")), "text/html; charset=utf-8"); err != nil {
+		t.Fatalf("PutSiteFile: %v", err)
+	}
+
+	meta, err := store.HeadSiteFile(ctx, "site", "index.html")
+	if err != nil {
+		t.Fatalf("HeadSiteFile: %v", err)
+	}
+	if meta.Filename != "index.html" || meta.ContentType != "text/html; charset=utf-8" || meta.Version == "" {
+		t.Fatalf("HeadSiteFile metadata = %#v", meta)
+	}
+	if _, err := store.HeadSiteFile(ctx, "site", "missing.html"); err != storage.ErrNotFound {
+		t.Fatalf("HeadSiteFile missing error = %v, want ErrNotFound", err)
+	}
+}
+
 func TestRecordUpload(t *testing.T) {
 	store := NewStore()
 	ctx := context.Background()

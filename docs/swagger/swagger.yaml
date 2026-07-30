@@ -41,7 +41,7 @@ definitions:
   cmd_server.AgentJSON:
     properties:
       api_base:
-        example: http://localhost:8080
+        example: https://trove.example.com
         type: string
       description:
         example: File sharing service. Upload any file, get a shareable link.
@@ -53,6 +53,19 @@ definitions:
       name:
         example: trove
         type: string
+    type: object
+  cmd_server.CommentListResponse:
+    properties:
+      current_version:
+        type: string
+      open_thread_count:
+        type: integer
+      resource:
+        type: string
+      threads:
+        items:
+          $ref: '#/definitions/comments.Thread'
+        type: array
     type: object
   cmd_server.ErrorResponse:
     properties:
@@ -72,8 +85,125 @@ definitions:
         example: my-report
         type: string
       url:
-        example: http://localhost:8080/my-report
+        example: https://trove.example.com/my-report
         type: string
+    type: object
+  comments.Anchor:
+    properties:
+      label:
+        type: string
+      quote:
+        $ref: '#/definitions/comments.TextQuote'
+      rect:
+        $ref: '#/definitions/comments.Rect'
+      resource:
+        type: string
+      role:
+        type: string
+      selector:
+        type: string
+      stable_id:
+        type: string
+      tag:
+        type: string
+      type:
+        $ref: '#/definitions/comments.AnchorType'
+      visible_text:
+        type: string
+    type: object
+  comments.AnchorType:
+    enum:
+    - file
+    - element
+    - text
+    type: string
+    x-enum-varnames:
+    - AnchorFile
+    - AnchorElement
+    - AnchorText
+  comments.Comment:
+    properties:
+      anchor:
+        $ref: '#/definitions/comments.Anchor'
+      artifact_version:
+        type: string
+      author_email:
+        type: string
+      body:
+        type: string
+      created_at:
+        type: string
+      deleted_at:
+        type: string
+      deleted_by_email:
+        type: string
+      edited_at:
+        type: string
+      edited_by_email:
+        type: string
+      id:
+        type: string
+      parent_id:
+        type: string
+      resolved_at:
+        type: string
+      resolved_by_email:
+        type: string
+      slug:
+        type: string
+      thread_id:
+        type: string
+    type: object
+  comments.CreateInput:
+    properties:
+      anchor:
+        $ref: '#/definitions/comments.Anchor'
+      body:
+        type: string
+    type: object
+  comments.EditInput:
+    properties:
+      body:
+        type: string
+    type: object
+  comments.Rect:
+    properties:
+      height:
+        type: integer
+      width:
+        type: integer
+      x:
+        type: integer
+      "y":
+        type: integer
+    type: object
+  comments.ReplyInput:
+    properties:
+      body:
+        type: string
+    type: object
+  comments.ResolveInput:
+    properties:
+      resolved:
+        type: boolean
+    type: object
+  comments.TextQuote:
+    properties:
+      exact:
+        type: string
+      prefix:
+        type: string
+      suffix:
+        type: string
+    type: object
+  comments.Thread:
+    properties:
+      replies:
+        items:
+          $ref: '#/definitions/comments.Comment'
+        type: array
+      root:
+        $ref: '#/definitions/comments.Comment'
     type: object
 host: localhost:8080
 info:
@@ -132,6 +262,32 @@ paths:
       summary: View a file
       tags:
       - files
+  /{slug}/{path}:
+    get:
+      description: Returns a file from an uploaded multi-page site
+      parameters:
+      - description: Site slug
+        in: path
+        name: slug
+        required: true
+        type: string
+      - description: File path within the site
+        in: path
+        name: path
+        required: true
+        type: string
+      responses:
+        "200":
+          description: File content
+          schema:
+            type: file
+        "404":
+          description: Not found
+          schema:
+            type: string
+      summary: Serve a site asset
+      tags:
+      - files
   /{slug}/raw:
     get:
       description: Returns the raw file content with its original content type. Supports
@@ -162,6 +318,360 @@ paths:
       summary: Download raw file
       tags:
       - files
+  /api/artifacts/{slug}/comments:
+    get:
+      description: Lists whole-artifact threads and threads anchored to the requested
+        site page. Open threads are returned by default.
+      parameters:
+      - description: Email used for audit attribution; send on reads when available
+        in: header
+        name: X-Trove-User-Email
+        type: string
+      - description: Artifact slug
+        in: path
+        name: slug
+        required: true
+        type: string
+      - description: Page path within a multi-page site
+        in: query
+        name: path
+        type: string
+      - description: 'Resolution filter: open, include, or only'
+        in: query
+        name: resolved
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/cmd_server.CommentListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+      summary: List artifact comment threads
+      tags:
+      - comments
+    post:
+      consumes:
+      - application/json
+      description: Creates a root comment attributed from X-Trove-User-Email. Supports
+        whole-file, element, and text anchors.
+      parameters:
+      - description: Email used for audit attribution
+        in: header
+        name: X-Trove-User-Email
+        required: true
+        type: string
+      - description: Artifact slug
+        in: path
+        name: slug
+        required: true
+        type: string
+      - description: Comment body and anchor
+        in: body
+        name: comment
+        required: true
+        schema:
+          $ref: '#/definitions/comments.CreateInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/comments.Comment'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+      summary: Create an artifact comment thread
+      tags:
+      - comments
+  /api/artifacts/{slug}/comments/{comment_id}:
+    delete:
+      description: Deletes a comment body while preserving a root tombstone when replies
+        remain. The attribution email must match the original author.
+      parameters:
+      - description: Email used for audit attribution and author matching
+        in: header
+        name: X-Trove-User-Email
+        required: true
+        type: string
+      - description: Artifact slug
+        in: path
+        name: slug
+        required: true
+        type: string
+      - description: Comment or reply ID
+        in: path
+        name: comment_id
+        required: true
+        type: string
+      - description: Page path within a multi-page site
+        in: query
+        name: path
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+      summary: Delete an artifact comment
+      tags:
+      - comments
+    patch:
+      consumes:
+      - application/json
+      description: Replaces a comment body. The attribution email must match the original
+        author.
+      parameters:
+      - description: Email used for audit attribution and author matching
+        in: header
+        name: X-Trove-User-Email
+        required: true
+        type: string
+      - description: Artifact slug
+        in: path
+        name: slug
+        required: true
+        type: string
+      - description: Comment or reply ID
+        in: path
+        name: comment_id
+        required: true
+        type: string
+      - description: Page path within a multi-page site
+        in: query
+        name: path
+        type: string
+      - description: Replacement body
+        in: body
+        name: edit
+        required: true
+        schema:
+          $ref: '#/definitions/comments.EditInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/comments.Comment'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+      summary: Edit an artifact comment
+      tags:
+      - comments
+  /api/artifacts/{slug}/comments/{comment_id}/replies:
+    post:
+      consumes:
+      - application/json
+      description: Adds a reply to an open thread.
+      parameters:
+      - description: Email used for audit attribution
+        in: header
+        name: X-Trove-User-Email
+        required: true
+        type: string
+      - description: Artifact slug
+        in: path
+        name: slug
+        required: true
+        type: string
+      - description: Root comment ID
+        in: path
+        name: comment_id
+        required: true
+        type: string
+      - description: Page path within a multi-page site
+        in: query
+        name: path
+        type: string
+      - description: Reply body
+        in: body
+        name: reply
+        required: true
+        schema:
+          $ref: '#/definitions/comments.ReplyInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/comments.Comment'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+      summary: Reply to an artifact comment thread
+      tags:
+      - comments
+  /api/artifacts/{slug}/comments/{comment_id}/resolution:
+    patch:
+      consumes:
+      - application/json
+      description: Updates the resolution state of a root comment thread.
+      parameters:
+      - description: Email used for audit attribution
+        in: header
+        name: X-Trove-User-Email
+        required: true
+        type: string
+      - description: Artifact slug
+        in: path
+        name: slug
+        required: true
+        type: string
+      - description: Root comment ID
+        in: path
+        name: comment_id
+        required: true
+        type: string
+      - description: Page path within a multi-page site
+        in: query
+        name: path
+        type: string
+      - description: Desired resolution state
+        in: body
+        name: resolution
+        required: true
+        schema:
+          $ref: '#/definitions/comments.ResolveInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/comments.Comment'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+      summary: Resolve or reopen an artifact comment thread
+      tags:
+      - comments
+  /delete/{slug}:
+    delete:
+      description: Deletes a file by slug. This endpoint is intentionally not exposed
+        via MCP or the UI.
+      parameters:
+      - description: Email used for audit attribution
+        in: header
+        name: X-Trove-User-Email
+        required: true
+        type: string
+      - description: File slug
+        in: path
+        name: slug
+        required: true
+        type: string
+      responses:
+        "204":
+          description: Deleted
+        "400":
+          description: Missing user email
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Delete a file
+      tags:
+      - admin
   /healthz:
     get:
       description: Returns service health status
@@ -208,6 +718,11 @@ paths:
       description: Upload a file and get a shareable link. Supports custom slugs and
         overwriting existing files.
       parameters:
+      - description: Email used for audit attribution
+        in: header
+        name: X-Trove-User-Email
+        required: true
+        type: string
       - description: File to upload
         in: formData
         name: file
