@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"html/template"
+	"sort"
 	"time"
 
 	"github.com/gametimesf/open-trove/storage"
@@ -468,6 +469,7 @@ var myTroveTemplate = template.Must(template.New("mytrove").Funcs(template.FuncM
 		}
 		return out
 	},
+	"recentFirst": recentFirst,
 }).Parse(`<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -522,7 +524,7 @@ var myTroveTemplate = template.Must(template.New("mytrove").Funcs(template.FuncM
       {{if not .Views}}
         <div class="empty">No views yet</div>
       {{else}}
-        {{range reversed .Views}}
+        {{range recentFirst .Views}}
         <div class="item">
           <div class="item-left">
             <a href="/{{.Slug}}">{{.Filename}}</a>
@@ -538,6 +540,25 @@ var myTroveTemplate = template.Must(template.New("mytrove").Funcs(template.FuncM
 <script src="/identity.js"></script>
 </body>
 </html>`))
+
+func recentFirst(records []storage.ActivityRecord) []storage.ActivityRecord {
+	out := append([]storage.ActivityRecord(nil), records...)
+	sort.SliceStable(out, func(i, j int) bool {
+		left, leftErr := time.Parse(time.RFC3339, out[i].At)
+		right, rightErr := time.Parse(time.RFC3339, out[j].At)
+		switch {
+		case leftErr != nil && rightErr != nil:
+			return false
+		case leftErr != nil:
+			return false
+		case rightErr != nil:
+			return true
+		default:
+			return left.After(right)
+		}
+	})
+	return out
+}
 
 var siteViewerTemplate = template.Must(template.New("siteviewer").Parse(`<!DOCTYPE html>
 <html lang="en">

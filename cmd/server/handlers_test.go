@@ -794,6 +794,32 @@ func TestHandleMineWithData(t *testing.T) {
 	}
 }
 
+func TestHandleMineSortsViewsByMostRecentlyViewed(t *testing.T) {
+	manifest := &storage.UserManifest{
+		Views: []storage.ActivityRecord{
+			{Slug: "most-recent", Filename: "most-recent.txt", ContentType: "text/plain", At: "2026-07-31T18:03:00Z"},
+			{Slug: "oldest", Filename: "oldest.txt", ContentType: "text/plain", At: "2026-07-29T18:03:00Z"},
+			{Slug: "middle", Filename: "middle.txt", ContentType: "text/plain", At: "2026-07-30T18:03:00Z"},
+		},
+	}
+
+	var page bytes.Buffer
+	if err := myTroveTemplate.Execute(&page, manifest); err != nil {
+		t.Fatalf("rendering My Trove: %v", err)
+	}
+
+	body := page.String()
+	mostRecent := strings.Index(body, `href="/most-recent"`)
+	middle := strings.Index(body, `href="/middle"`)
+	oldest := strings.Index(body, `href="/oldest"`)
+	if mostRecent == -1 || middle == -1 || oldest == -1 {
+		t.Fatalf("expected every view in page, got indexes: most recent=%d middle=%d oldest=%d", mostRecent, middle, oldest)
+	}
+	if !(mostRecent < middle && middle < oldest) {
+		t.Errorf("expected views in descending view time, got indexes: most recent=%d middle=%d oldest=%d", mostRecent, middle, oldest)
+	}
+}
+
 func TestHandleViewVideo(t *testing.T) {
 	srv, store := newTestServer()
 	e := newTestEcho(srv)
