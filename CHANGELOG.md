@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.2](https://github.com/gametimesf/open-trove/compare/open-trove-v1.0.1...open-trove-v1.0.2) (2026-07-31)
+
+
+### Bug Fixes
+
+* sort recent views by access time ([#8](https://github.com/gametimesf/open-trove/issues/8)) ([d94fc90](https://github.com/gametimesf/open-trove/commit/d94fc90feab29a06fb836031ea02989b25b84268))
+
 ## [1.0.1](https://github.com/gametimesf/open-trove/compare/open-trove-v1.0.0...open-trove-v1.0.1) (2026-07-30)
 
 
