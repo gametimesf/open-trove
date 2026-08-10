@@ -33,6 +33,10 @@ func TestCommentAssetsAreServed(t *testing.T) {
 				`event.target.closest("button, a, input, textarea, select, form")`,
 				"Collapse thread",
 				"trove-comment-thread__summary",
+				"event.metaKey || event.ctrlKey",
+				"submitForm.requestSubmit(submitButton)",
+				"addSubmitShortcut(textarea, form, submit)",
+				"addSubmitShortcut(replyBody, replyForm, replySubmit)",
 			},
 		},
 		{
