@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/gametimesf/open-trove/compare/open-trove-v1.0.2...open-trove-v1.1.0) (2026-08-10)
+
+
+### Features
+
+* submit comments with command enter ([#10](https://github.com/gametimesf/open-trove/issues/10)) ([5862f4c](https://github.com/gametimesf/open-trove/commit/5862f4c15e195fe0d4f2c1f58acda74cf2317175))
+
 ## [1.0.2](https://github.com/gametimesf/open-trove/compare/open-trove-v1.0.1...open-trove-v1.0.2) (2026-07-31)
 
 
