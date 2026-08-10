@@ -425,6 +425,14 @@
     return button;
   }
 
+  function addSubmitShortcut(input, submitForm, submitButton) {
+    input.addEventListener("keydown", event => {
+      if (event.isComposing || event.key !== "Enter" || !(event.metaKey || event.ctrlKey)) return;
+      event.preventDefault();
+      if (!submitButton.disabled) submitForm.requestSubmit(submitButton);
+    });
+  }
+
   function messageElement(comment) {
     const message = document.createElement("div");
     message.className = "trove-comment-message";
@@ -600,6 +608,7 @@
       replySubmit.className = "trove-comment-submit";
       replySubmit.textContent = "Post reply";
       replyForm.append(replyBody, replySubmit);
+      addSubmitShortcut(replyBody, replyForm, replySubmit);
       replyForm.addEventListener("submit", async event => {
         event.preventDefault();
         if (!replyBody.value.trim()) return;
@@ -785,6 +794,7 @@
       submit.disabled = false;
     }
   });
+  addSubmitShortcut(textarea, form, submit);
 
   toggle.addEventListener("click", () => active ? closeComments() : openComments());
   close.addEventListener("click", closeComments);
