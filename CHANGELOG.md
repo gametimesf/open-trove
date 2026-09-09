@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/gametimesf/open-trove/compare/open-trove-v1.1.0...open-trove-v1.1.1) (2026-09-09)
+
+
+### Bug Fixes
+
+* capture complete My Trove activity and uploader attribution ([7997d95](https://github.com/gametimesf/open-trove/commit/7997d954f2c731506fc142812e15ee6d01257a92))
+
 ## [1.1.0](https://github.com/gametimesf/open-trove/compare/open-trove-v1.0.2...open-trove-v1.1.0) (2026-08-10)
 
 
