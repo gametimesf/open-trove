@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"github.com/gametimesf/open-trove/storage"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -86,7 +87,7 @@ func TestEveryViewerRendersCommentChrome(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			srv, store := newTestServer()
-			if err := store.Put(context.Background(), "artifact", bytes.NewBufferString(tt.data), tt.contentType, tt.filename, true, false); err != nil {
+			if err := store.Put(context.Background(), "artifact", bytes.NewBufferString(tt.data), storage.PutOptions{ContentType: tt.contentType, Filename: tt.filename, CustomSlug: true, Overwrite: false}); err != nil {
 				t.Fatalf("Put() error = %v", err)
 			}
 			e := newTestEcho(srv)
@@ -116,6 +117,9 @@ func TestEveryViewerRendersCommentChrome(t *testing.T) {
 
 func TestSiteViewerRendersCommentChrome(t *testing.T) {
 	srv, store := newTestServer()
+	if err := store.PutSiteManifest(t.Context(), "site", &storage.SiteManifest{Entry: "index.html", FileCount: 1}); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.PutSiteFile(context.Background(), "site", "index.html", bytes.NewBufferString("<h1>Home</h1>"), "text/html; charset=utf-8"); err != nil {
 		t.Fatalf("PutSiteFile() error = %v", err)
 	}

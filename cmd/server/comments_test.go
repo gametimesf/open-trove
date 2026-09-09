@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/gametimesf/open-trove/storage"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -13,7 +14,7 @@ import (
 
 func TestCommentAPIExistingSingleFile(t *testing.T) {
 	srv, store := newTestServer()
-	if err := store.Put(context.Background(), "report", bytes.NewBufferString("<h1>Report</h1>"), "text/html; charset=utf-8", "report.html", true, false); err != nil {
+	if err := store.Put(context.Background(), "report", bytes.NewBufferString("<h1>Report</h1>"), storage.PutOptions{ContentType: "text/html; charset=utf-8", Filename: "report.html", CustomSlug: true, Overwrite: false}); err != nil {
 		t.Fatalf("Put() error = %v", err)
 	}
 	e := newTestEcho(srv)
@@ -68,7 +69,7 @@ func TestCommentAPIExistingSingleFile(t *testing.T) {
 
 func TestSingleFileCommentsIgnoreResourcePath(t *testing.T) {
 	srv, store := newTestServer()
-	if err := store.Put(context.Background(), "report", bytes.NewBufferString("report"), "text/plain", "report.txt", true, false); err != nil {
+	if err := store.Put(context.Background(), "report", bytes.NewBufferString("report"), storage.PutOptions{ContentType: "text/plain", Filename: "report.txt", CustomSlug: true, Overwrite: false}); err != nil {
 		t.Fatalf("Put() error = %v", err)
 	}
 	e := newTestEcho(srv)
@@ -176,7 +177,7 @@ func TestSiteCommentMutationsUseRequestedPage(t *testing.T) {
 
 func TestCommentThreadLifecycleAPI(t *testing.T) {
 	srv, store := newTestServer()
-	if err := store.Put(context.Background(), "report", bytes.NewBufferString("report"), "text/plain", "report.txt", true, false); err != nil {
+	if err := store.Put(context.Background(), "report", bytes.NewBufferString("report"), storage.PutOptions{ContentType: "text/plain", Filename: "report.txt", CustomSlug: true, Overwrite: false}); err != nil {
 		t.Fatalf("Put() error = %v", err)
 	}
 	e := newTestEcho(srv)
@@ -276,7 +277,7 @@ func TestCommentThreadLifecycleAPI(t *testing.T) {
 
 func TestCommentAPIErrors(t *testing.T) {
 	srv, store := newTestServer()
-	if err := store.Put(context.Background(), "report", bytes.NewBufferString("report"), "text/plain", "report.txt", true, false); err != nil {
+	if err := store.Put(context.Background(), "report", bytes.NewBufferString("report"), storage.PutOptions{ContentType: "text/plain", Filename: "report.txt", CustomSlug: true, Overwrite: false}); err != nil {
 		t.Fatalf("Put() error = %v", err)
 	}
 	e := newTestEcho(srv)
@@ -316,7 +317,7 @@ func TestCommentAPIErrors(t *testing.T) {
 
 func TestDeleteArtifactRemovesComments(t *testing.T) {
 	srv, store := newTestServer()
-	if err := store.Put(context.Background(), "report", bytes.NewBufferString("report"), "text/plain", "report.txt", true, false); err != nil {
+	if err := store.Put(context.Background(), "report", bytes.NewBufferString("report"), storage.PutOptions{ContentType: "text/plain", Filename: "report.txt", CustomSlug: true, Overwrite: false}); err != nil {
 		t.Fatalf("Put() error = %v", err)
 	}
 	e := newTestEcho(srv)
@@ -338,7 +339,7 @@ func TestDeleteArtifactRemovesComments(t *testing.T) {
 		t.Fatalf("DELETE status = %d, body = %s", rec.Code, rec.Body.String())
 	}
 
-	if err := store.Put(context.Background(), "report", bytes.NewBufferString("replacement"), "text/plain", "report.txt", true, false); err != nil {
+	if err := store.Put(context.Background(), "report", bytes.NewBufferString("replacement"), storage.PutOptions{ContentType: "text/plain", Filename: "report.txt", CustomSlug: true, Overwrite: false}); err != nil {
 		t.Fatalf("replacement Put() error = %v", err)
 	}
 	req = httptest.NewRequest(http.MethodGet, "/api/artifacts/report/comments", nil)

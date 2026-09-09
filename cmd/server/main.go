@@ -119,7 +119,7 @@ func registerRoutes(e *echo.Echo, srv *server) {
 	e.DELETE("/delete/:slug", srv.handleDelete)
 	e.GET("/:slug/raw", srv.handleRaw)
 	e.GET("/:slug", srv.handleView, userIDMiddleware)
-	e.GET("/:slug/*", srv.handleSiteAsset)
+	e.GET("/:slug/*", srv.handleSiteAsset, siteNavigationMiddleware)
 }
 
 // healthHandler godoc

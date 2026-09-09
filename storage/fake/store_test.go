@@ -13,7 +13,7 @@ func TestPutAndGet(t *testing.T) {
 	store := NewStore()
 	ctx := context.Background()
 
-	err := store.Put(ctx, "test-slug", bytes.NewReader([]byte("hello")), "text/plain", "hello.txt", false, false)
+	err := store.Put(ctx, "test-slug", bytes.NewReader([]byte("hello")), storage.PutOptions{ContentType: "text/plain", Filename: "hello.txt", CustomSlug: false, Overwrite: false})
 	if err != nil {
 		t.Fatalf("Put: %v", err)
 	}
@@ -40,12 +40,12 @@ func TestPutConflict(t *testing.T) {
 	store := NewStore()
 	ctx := context.Background()
 
-	err := store.Put(ctx, "test", bytes.NewReader([]byte("a")), "text/plain", "a.txt", false, false)
+	err := store.Put(ctx, "test", bytes.NewReader([]byte("a")), storage.PutOptions{ContentType: "text/plain", Filename: "a.txt", CustomSlug: false, Overwrite: false})
 	if err != nil {
 		t.Fatalf("first Put: %v", err)
 	}
 
-	err = store.Put(ctx, "test", bytes.NewReader([]byte("b")), "text/plain", "b.txt", false, false)
+	err = store.Put(ctx, "test", bytes.NewReader([]byte("b")), storage.PutOptions{ContentType: "text/plain", Filename: "b.txt", CustomSlug: false, Overwrite: false})
 	if err != storage.ErrSlugConflict {
 		t.Errorf("expected ErrSlugConflict, got %v", err)
 	}
@@ -55,12 +55,12 @@ func TestPutOverwrite(t *testing.T) {
 	store := NewStore()
 	ctx := context.Background()
 
-	err := store.Put(ctx, "test", bytes.NewReader([]byte("a")), "text/plain", "a.txt", true, false)
+	err := store.Put(ctx, "test", bytes.NewReader([]byte("a")), storage.PutOptions{ContentType: "text/plain", Filename: "a.txt", CustomSlug: true, Overwrite: false})
 	if err != nil {
 		t.Fatalf("first Put: %v", err)
 	}
 
-	err = store.Put(ctx, "test", bytes.NewReader([]byte("b")), "text/plain", "b.txt", true, true)
+	err = store.Put(ctx, "test", bytes.NewReader([]byte("b")), storage.PutOptions{ContentType: "text/plain", Filename: "b.txt", CustomSlug: true, Overwrite: true})
 	if err != nil {
 		t.Fatalf("overwrite Put: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestMetadata(t *testing.T) {
 	store := NewStore()
 	ctx := context.Background()
 
-	err := store.Put(ctx, "doc", bytes.NewReader([]byte("<html>")), "text/html; charset=utf-8", "index.html", false, false)
+	err := store.Put(ctx, "doc", bytes.NewReader([]byte("<html>")), storage.PutOptions{ContentType: "text/html; charset=utf-8", Filename: "index.html", CustomSlug: false, Overwrite: false})
 	if err != nil {
 		t.Fatalf("Put: %v", err)
 	}

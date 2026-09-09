@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"strings"
 	"sync"
 	"time"
 
@@ -21,6 +20,7 @@ type storedObject struct {
 	contentType string
 	filename    string
 	customSlug  bool
+	ownerEmail  string
 }
 
 // Store is an in-memory fake of storage.Store for testing.
@@ -40,11 +40,11 @@ func NewStore() *Store {
 	}
 }
 
-func (s *Store) Put(_ context.Context, slug string, body io.Reader, contentType, filename string, customSlug, overwrite bool) error {
+func (s *Store) Put(_ context.Context, slug string, body io.Reader, opts storage.PutOptions) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if !overwrite {
+	if !opts.Overwrite {
 		if _, exists := s.objects[slug]; exists {
 			return storage.ErrSlugConflict
 		}
@@ -57,9 +57,10 @@ func (s *Store) Put(_ context.Context, slug string, body io.Reader, contentType,
 
 	s.objects[slug] = &storedObject{
 		data:        data,
-		contentType: contentType,
-		filename:    filename,
-		customSlug:  customSlug,
+		contentType: opts.ContentType,
+		filename:    opts.Filename,
+		customSlug:  opts.CustomSlug,
+		ownerEmail:  opts.OwnerEmail,
 	}
 	return nil
 }
@@ -78,6 +79,7 @@ func (s *Store) Get(_ context.Context, slug string, _ string) (io.ReadCloser, *s
 		Filename:    obj.filename,
 		Version:     objectVersion(obj.data),
 		CustomSlug:  obj.customSlug,
+		OwnerEmail:  obj.ownerEmail,
 	}, nil
 }
 
@@ -105,6 +107,7 @@ func (s *Store) Metadata(_ context.Context, slug string) (*storage.FileMetadata,
 		Filename:    obj.filename,
 		Version:     objectVersion(obj.data),
 		CustomSlug:  obj.customSlug,
+		OwnerEmail:  obj.ownerEmail,
 	}, nil
 }
 
@@ -116,8 +119,8 @@ func (s *Store) RecordUpload(_ context.Context, userID string, record storage.Ac
 		manifest = &storage.UserManifest{}
 		s.manifests[userID] = manifest
 	}
-	record.At = time.Now().UTC().Format(time.RFC3339)
-	manifest.Uploads = append(manifest.Uploads, record)
+	record.At = time.Now().UTC().Format(time.RFC3339Nano)
+	manifest.RecordUpload(record)
 	return nil
 }
 
@@ -129,14 +132,8 @@ func (s *Store) RecordView(_ context.Context, userID string, record storage.Acti
 		manifest = &storage.UserManifest{}
 		s.manifests[userID] = manifest
 	}
-	record.At = time.Now().UTC().Format(time.RFC3339)
-	for i, v := range manifest.Views {
-		if v.Slug == record.Slug {
-			manifest.Views[i] = record
-			return nil
-		}
-	}
-	manifest.Views = append(manifest.Views, record)
+	record.At = time.Now().UTC().Format(time.RFC3339Nano)
+	manifest.RecordView(record)
 	return nil
 }
 
@@ -144,7 +141,7 @@ func (s *Store) GetManifest(_ context.Context, userID string) (*storage.UserMani
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if manifest, ok := s.manifests[userID]; ok {
-		return manifest, nil
+		return &storage.UserManifest{Uploads: append([]storage.ActivityRecord(nil), manifest.Uploads...), Views: append([]storage.ActivityRecord(nil), manifest.Views...)}, nil
 	}
 	return &storage.UserManifest{}, nil
 }
@@ -191,13 +188,8 @@ func (s *Store) HeadSiteFile(_ context.Context, siteSlug, path string) (*storage
 func (s *Store) HeadSite(_ context.Context, siteSlug string) (bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	prefix := siteSlug + "/"
-	for k := range s.objects {
-		if strings.HasPrefix(k, prefix) {
-			return true, nil
-		}
-	}
-	return false, nil
+	_, ok := s.objects[siteSlug+"/_site_manifest.json"]
+	return ok, nil
 }
 
 func (s *Store) PutSiteManifest(_ context.Context, siteSlug string, m *storage.SiteManifest) error {
@@ -254,4 +246,18 @@ func (s *Store) DeleteComments(_ context.Context, slug string) error {
 
 func objectVersion(data []byte) string {
 	return fmt.Sprintf("%x", sha256.Sum256(data))
+}
+
+func (s *Store) GetSiteManifest(_ context.Context, slug string) (*storage.SiteManifest, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	obj, ok := s.objects[slug+"/_site_manifest.json"]
+	if !ok {
+		return nil, storage.ErrNotFound
+	}
+	var manifest storage.SiteManifest
+	if err := json.Unmarshal(obj.data, &manifest); err != nil {
+		return nil, err
+	}
+	return &manifest, nil
 }

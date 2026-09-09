@@ -32,6 +32,13 @@ survive container restarts.
 
 ## Identity and access
 
+My Trove history is scoped to the browser's `trove_id` cookie, not the entered
+email. Recently Viewed includes your own files and sites, ordered by last view;
+background assets and raw downloads do not create visits. Rows show uploader
+attribution when available, or "unknown" for older artifacts without it. Activity
+writes use bounded conditional S3 updates; loading failures are shown as errors
+rather than an empty history. No identity linking or history backfill is performed.
+
 Trove's built-in identity is intentionally **attribution, not authentication**.
 The browser asks for an email once, stores it locally, and sends
 `X-Trove-User-Email`. API and agent clients must send the same header on every
