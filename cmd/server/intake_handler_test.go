@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"github.com/gametimesf/open-trove/storage"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/gametimesf/open-trove/intake"
+	"github.com/gametimesf/open-trove/storage"
 )
 
 func buildZip(t *testing.T, files map[string]string) []byte {

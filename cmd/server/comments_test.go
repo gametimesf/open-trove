@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"github.com/gametimesf/open-trove/storage"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/gametimesf/open-trove/comments"
+	"github.com/gametimesf/open-trove/storage"
 )
 
 func TestCommentAPIExistingSingleFile(t *testing.T) {

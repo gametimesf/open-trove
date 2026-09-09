@@ -1,6 +1,6 @@
 module github.com/gametimesf/open-trove
 
-go 1.26.5
+go 1.26.8
 
 require (
 	github.com/BrunoKrugel/echo-mcp v0.1.11
