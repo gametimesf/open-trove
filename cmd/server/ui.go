@@ -462,13 +462,6 @@ var myTroveTemplate = template.Must(template.New("mytrove").Funcs(template.FuncM
 			return t.Format("Jan 2, 2006")
 		}
 	},
-	"reversed": func(records []storage.ActivityRecord) []storage.ActivityRecord {
-		out := make([]storage.ActivityRecord, len(records))
-		for i, r := range records {
-			out[len(records)-1-i] = r
-		}
-		return out
-	},
 	"recentFirst": recentFirst,
 }).Parse(`<!DOCTYPE html>
 <html lang="en">
@@ -508,10 +501,11 @@ var myTroveTemplate = template.Must(template.New("mytrove").Funcs(template.FuncM
       {{if not .Uploads}}
         <div class="empty">No uploads yet</div>
       {{else}}
-        {{range reversed .Uploads}}
+        {{range recentFirst .Uploads}}
         <div class="item">
           <div class="item-left">
             <a href="/{{.Slug}}">{{.Filename}}</a>
+            <div class="meta">Uploaded by {{if .OwnerEmail}}{{.OwnerEmail}}{{else if .UserEmail}}{{.UserEmail}}{{else}}unknown{{end}}</div>
             <div class="meta">{{.ContentType}}</div>
           </div>
           <div class="item-right">{{reltime .At}}</div>
@@ -528,6 +522,7 @@ var myTroveTemplate = template.Must(template.New("mytrove").Funcs(template.FuncM
         <div class="item">
           <div class="item-left">
             <a href="/{{.Slug}}">{{.Filename}}</a>
+            <div class="meta">Uploaded by {{if .OwnerEmail}}{{.OwnerEmail}}{{else}}unknown{{end}}</div>
             <div class="meta">{{.ContentType}}</div>
           </div>
           <div class="item-right">{{reltime .At}}</div>

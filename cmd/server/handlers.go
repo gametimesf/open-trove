@@ -94,6 +94,18 @@ func userIDMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 	}
 }
 
+// Only top-level browser navigation to a site page affects history; an iframe,
+// stylesheet, or background fetch must not invent another document visit.
+func siteNavigationMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
+	tracked := userIDMiddleware(next)
+	return func(c echo.Context) error {
+		if c.Request().Header.Get("Sec-Fetch-Dest") == "document" && c.Request().Header.Get("Sec-Fetch-Mode") == "navigate" {
+			return tracked(c)
+		}
+		return next(c)
+	}
+}
+
 func userID(c echo.Context) string {
 	if v, ok := c.Get("trove_id").(string); ok {
 		return v
@@ -331,7 +343,7 @@ func (s *server) handleUpload(c echo.Context) error {
 	// Retry with new slugs on conflict (only for auto-generated slugs)
 	const maxRetries = 5
 	for attempt := 0; ; attempt++ {
-		if err := s.store.Put(r.Context(), slug, bytes.NewReader(fileBytes), contentType, header.Filename, userProvidedSlug, overwrite); err != nil {
+		if err := s.store.Put(r.Context(), slug, bytes.NewReader(fileBytes), storage.PutOptions{ContentType: contentType, Filename: header.Filename, OwnerEmail: userEmail(c), CustomSlug: userProvidedSlug, Overwrite: overwrite}); err != nil {
 			if errors.Is(err, storage.ErrSlugConflict) {
 				if userProvidedSlug {
 					return c.JSON(http.StatusConflict, map[string]string{"error": "slug already taken"})
@@ -361,6 +373,7 @@ func (s *server) handleUpload(c echo.Context) error {
 			Filename:    header.Filename,
 			ContentType: contentType,
 			UserEmail:   userEmail(c),
+			OwnerEmail:  userEmail(c),
 		}
 		if err := s.store.RecordUpload(r.Context(), uid, rec); err != nil {
 			log.Printf("WARN  recording upload for user %s: %v", uid, err)
@@ -418,12 +431,13 @@ func (s *server) handleView(c echo.Context) error {
 	}
 
 	// Check if this slug is a site
-	isSite, err := s.store.HeadSite(c.Request().Context(), slug)
-	if err != nil {
+	site, err := s.store.GetSiteManifest(c.Request().Context(), slug)
+	if err != nil && !errors.Is(err, storage.ErrNotFound) {
 		log.Printf("ERROR checking site %s: %v", slug, err)
 		return renderError(c, http.StatusInternalServerError, "Internal error")
 	}
-	if isSite {
+	if site != nil {
+		s.recordView(c, slug, slug, "text/html; charset=utf-8", site.OwnerEmail)
 		uid := userID(c)
 		log.Printf("INFO  user_email=%q user_id=%s viewing site slug=%s", userEmail(c), uid, slug)
 		c.Response().Header().Set(echo.HeaderContentType, "text/html; charset=utf-8")
@@ -442,32 +456,8 @@ func (s *server) handleView(c echo.Context) error {
 		return renderError(c, http.StatusInternalServerError, "Internal error")
 	}
 
-	// Record view in user manifest (best-effort, skip own uploads)
-	uid := userID(c)
-	log.Printf("INFO  user_email=%q user_id=%s viewing slug=%s filename=%q", userEmail(c), uid, slug, meta.Filename)
-	if uid != "" {
-		manifest, err := s.store.GetManifest(c.Request().Context(), uid)
-		isOwnUpload := false
-		if err == nil {
-			for _, u := range manifest.Uploads {
-				if u.Slug == slug {
-					isOwnUpload = true
-					break
-				}
-			}
-		}
-		if !isOwnUpload {
-			rec := storage.ActivityRecord{
-				Slug:        slug,
-				Filename:    meta.Filename,
-				ContentType: meta.ContentType,
-				UserEmail:   userEmail(c),
-			}
-			if err := s.store.RecordView(c.Request().Context(), uid, rec); err != nil {
-				log.Printf("WARN recording view for user %s: %v", uid, err)
-			}
-		}
-	}
+	s.recordView(c, slug, meta.Filename, meta.ContentType, meta.OwnerEmail)
+	log.Printf("INFO  user_email=%q user_id=%s viewing slug=%s filename=%q", userEmail(c), userID(c), slug, meta.Filename)
 
 	downloadName := meta.Filename
 	if meta.CustomSlug {
@@ -506,6 +496,18 @@ func (s *server) handleView(c echo.Context) error {
 	return viewerTemplate.Execute(c.Response(), data)
 }
 
+// recordView records explicit viewer navigation, not embedded assets or downloads.
+func (s *server) recordView(c echo.Context, slug, filename, contentType, ownerEmail string) {
+	uid := userID(c)
+	if uid == "" {
+		return
+	}
+	record := storage.ActivityRecord{Slug: slug, Filename: filename, ContentType: contentType, UserEmail: userEmail(c), OwnerEmail: ownerEmail}
+	if err := s.store.RecordView(c.Request().Context(), uid, record); err != nil {
+		log.Printf("WARN recording view for user %s slug=%s: %v", uid, slug, err)
+	}
+}
+
 // handleMine godoc
 // @Summary User activity dashboard
 // @Description Shows the current user's upload and view history
@@ -524,7 +526,7 @@ func (s *server) handleMine(c echo.Context) error {
 	manifest, err := s.store.GetManifest(c.Request().Context(), uid)
 	if err != nil {
 		log.Printf("ERROR getting manifest for user %s: %v", uid, err)
-		manifest = &storage.UserManifest{}
+		return renderError(c, http.StatusInternalServerError, "Unable to load your activity. Please try again.")
 	}
 
 	c.Response().Header().Set(echo.HeaderContentType, "text/html; charset=utf-8")
@@ -709,7 +711,7 @@ func (s *server) handleSiteUploadFromZip(c echo.Context, slug string, zipBytes [
 		fileCount++
 	}
 
-	if err := s.store.PutSiteManifest(r.Context(), slug, &storage.SiteManifest{Entry: "index.html", FileCount: fileCount}); err != nil {
+	if err := s.store.PutSiteManifest(r.Context(), slug, &storage.SiteManifest{Entry: "index.html", FileCount: fileCount, OwnerEmail: userEmail(c)}); err != nil {
 		log.Printf("ERROR storing site manifest for %s: %v", slug, err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "internal error"})
 	}
@@ -721,6 +723,7 @@ func (s *server) handleSiteUploadFromZip(c echo.Context, slug string, zipBytes [
 			Filename:    slug,
 			ContentType: "text/html; charset=utf-8",
 			UserEmail:   userEmail(c),
+			OwnerEmail:  userEmail(c),
 		}
 		if err := s.store.RecordUpload(r.Context(), uid, rec); err != nil {
 			log.Printf("WARN recording site upload for user %s: %v", uid, err)
@@ -798,6 +801,15 @@ func (s *server) handleSiteAsset(c echo.Context) error {
 		return renderError(c, http.StatusInternalServerError, "Internal error")
 	}
 	defer body.Close()
+
+	if userID(c) != "" && strings.HasPrefix(meta.ContentType, "text/html") {
+		site, err := s.store.GetSiteManifest(c.Request().Context(), slug)
+		if err != nil {
+			log.Printf("WARN reading site attribution slug=%s: %v", slug, err)
+		} else {
+			s.recordView(c, slug, slug, "text/html; charset=utf-8", site.OwnerEmail)
+		}
+	}
 
 	c.Response().Header().Set(echo.HeaderContentType, meta.ContentType)
 	_, err = io.Copy(c.Response(), body)

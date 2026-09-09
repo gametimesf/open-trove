@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/gametimesf/open-trove/intake"
+	"github.com/gametimesf/open-trove/storage"
 )
 
 func buildZip(t *testing.T, files map[string]string) []byte {
@@ -205,7 +206,7 @@ func TestInternalSlugsAreNotServed(t *testing.T) {
 	// Direct write to the store under an internal-prefix key, simulating
 	// what an admin's prompt upload (or a legacy _users entry) would
 	// look like to the view path.
-	if err := srv.store.Put(context.Background(), "_prompt", strings.NewReader("super secret guidance"), "text/plain", "_prompt", false, true); err != nil {
+	if err := srv.store.Put(context.Background(), "_prompt", strings.NewReader("super secret guidance"), storage.PutOptions{ContentType: "text/plain", Filename: "_prompt", CustomSlug: false, Overwrite: true}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 

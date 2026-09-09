@@ -347,7 +347,7 @@ func TestHandleUploadSlugConflict(t *testing.T) {
 	e := newTestEcho(srv)
 
 	// Pre-populate the store
-	store.Put(nil, "taken", bytes.NewReader([]byte("x")), "text/plain", "x.txt", false, false)
+	store.Put(nil, "taken", bytes.NewReader([]byte("x")), storage.PutOptions{ContentType: "text/plain", Filename: "x.txt", CustomSlug: false, Overwrite: false})
 
 	req := createMultipartRequest(t, "file.txt", []byte("data"), "taken")
 	w := httptest.NewRecorder()
@@ -363,7 +363,7 @@ func TestHandleUploadOverwrite(t *testing.T) {
 	e := newTestEcho(srv)
 
 	// Pre-populate the store
-	store.Put(nil, "my-doc", bytes.NewReader([]byte("v1")), "text/plain", "old.txt", true, false)
+	store.Put(nil, "my-doc", bytes.NewReader([]byte("v1")), storage.PutOptions{ContentType: "text/plain", Filename: "old.txt", CustomSlug: true, Overwrite: false})
 
 	req := createMultipartRequestWithOverwrite(t, "new.txt", []byte("v2"), "my-doc", true)
 	w := httptest.NewRecorder()
@@ -407,7 +407,7 @@ func TestHandleViewHTML(t *testing.T) {
 	srv, store := newTestServer()
 	e := newTestEcho(srv)
 
-	store.Put(nil, "page", bytes.NewReader([]byte("<html>hi</html>")), "text/html; charset=utf-8", "index.html", false, false)
+	store.Put(nil, "page", bytes.NewReader([]byte("<html>hi</html>")), storage.PutOptions{ContentType: "text/html; charset=utf-8", Filename: "index.html", CustomSlug: false, Overwrite: false})
 
 	req := httptest.NewRequest("GET", "/page", nil)
 	w := httptest.NewRecorder()
@@ -429,7 +429,7 @@ func TestHandleViewImage(t *testing.T) {
 	srv, store := newTestServer()
 	e := newTestEcho(srv)
 
-	store.Put(nil, "pic", bytes.NewReader([]byte("PNG...")), "image/png", "photo.png", false, false)
+	store.Put(nil, "pic", bytes.NewReader([]byte("PNG...")), storage.PutOptions{ContentType: "image/png", Filename: "photo.png", CustomSlug: false, Overwrite: false})
 
 	req := httptest.NewRequest("GET", "/pic", nil)
 	w := httptest.NewRecorder()
@@ -448,7 +448,7 @@ func TestHandleViewOther(t *testing.T) {
 	srv, store := newTestServer()
 	e := newTestEcho(srv)
 
-	store.Put(nil, "doc", bytes.NewReader([]byte("%PDF...")), "application/pdf", "report.pdf", false, false)
+	store.Put(nil, "doc", bytes.NewReader([]byte("%PDF...")), storage.PutOptions{ContentType: "application/pdf", Filename: "report.pdf", CustomSlug: false, Overwrite: false})
 
 	req := httptest.NewRequest("GET", "/doc", nil)
 	w := httptest.NewRecorder()
@@ -481,7 +481,7 @@ func TestHandleRaw(t *testing.T) {
 	e := newTestEcho(srv)
 
 	content := []byte("<html><body>Hello</body></html>")
-	store.Put(nil, "raw1", bytes.NewReader(content), "text/html; charset=utf-8", "page.html", false, false)
+	store.Put(nil, "raw1", bytes.NewReader(content), storage.PutOptions{ContentType: "text/html; charset=utf-8", Filename: "page.html", CustomSlug: false, Overwrite: false})
 
 	req := httptest.NewRequest("GET", "/raw1/raw", nil)
 	w := httptest.NewRecorder()
@@ -673,7 +673,7 @@ func TestViewRecordsActivity(t *testing.T) {
 	userB := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
 	// Upload a file as user A
-	store.Put(nil, "shared-doc", bytes.NewReader([]byte("hi")), "text/plain", "doc.txt", false, false)
+	store.Put(nil, "shared-doc", bytes.NewReader([]byte("hi")), storage.PutOptions{ContentType: "text/plain", Filename: "doc.txt", CustomSlug: false, Overwrite: false})
 	store.RecordUpload(nil, "user-a", storage.ActivityRecord{Slug: "shared-doc", Filename: "doc.txt", ContentType: "text/plain"})
 
 	// View as user B
@@ -699,13 +699,13 @@ func TestViewRecordsActivity(t *testing.T) {
 	}
 }
 
-func TestViewOwnUploadNotRecorded(t *testing.T) {
+func TestViewOwnUploadRecorded(t *testing.T) {
 	srv, store := newTestServer()
 	e := newTestEcho(srv)
 
-	uid := "uploader-1"
+	uid := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 	// Upload a file and record it in manifest
-	store.Put(nil, "my-file", bytes.NewReader([]byte("hi")), "text/plain", "file.txt", true, false)
+	store.Put(nil, "my-file", bytes.NewReader([]byte("hi")), storage.PutOptions{ContentType: "text/plain", Filename: "file.txt", CustomSlug: true, Overwrite: false})
 	store.RecordUpload(nil, uid, storage.ActivityRecord{Slug: "my-file", Filename: "file.txt", ContentType: "text/plain"})
 
 	// View own file
@@ -719,8 +719,8 @@ func TestViewOwnUploadNotRecorded(t *testing.T) {
 	}
 
 	m, _ := store.GetManifest(nil, uid)
-	if len(m.Views) != 0 {
-		t.Errorf("expected 0 views (own upload), got %d", len(m.Views))
+	if len(m.Views) != 1 {
+		t.Errorf("expected 1 view (own upload), got %d", len(m.Views))
 	}
 }
 
@@ -728,7 +728,7 @@ func TestViewDeduplication(t *testing.T) {
 	srv, store := newTestServer()
 	e := newTestEcho(srv)
 
-	store.Put(nil, "the-doc", bytes.NewReader([]byte("hi")), "text/plain", "doc.txt", false, false)
+	store.Put(nil, "the-doc", bytes.NewReader([]byte("hi")), storage.PutOptions{ContentType: "text/plain", Filename: "doc.txt", CustomSlug: false, Overwrite: false})
 
 	uid := "11111111-1111-1111-1111-111111111111"
 
@@ -750,7 +750,7 @@ func TestHandleRawDownloadFilename(t *testing.T) {
 	srv, store := newTestServer()
 	e := newTestEcho(srv)
 
-	store.Put(nil, "my-report", bytes.NewReader([]byte("<html>hi</html>")), "text/html; charset=utf-8", "report.html", true, false)
+	store.Put(nil, "my-report", bytes.NewReader([]byte("<html>hi</html>")), storage.PutOptions{ContentType: "text/html; charset=utf-8", Filename: "report.html", CustomSlug: true, Overwrite: false})
 
 	req := httptest.NewRequest("GET", "/my-report/raw", nil)
 	w := httptest.NewRecorder()
@@ -824,7 +824,7 @@ func TestHandleViewVideo(t *testing.T) {
 	srv, store := newTestServer()
 	e := newTestEcho(srv)
 
-	store.Put(nil, "clip", bytes.NewReader([]byte{0x00, 0x00}), "video/mp4", "video.mp4", false, false)
+	store.Put(nil, "clip", bytes.NewReader([]byte{0x00, 0x00}), storage.PutOptions{ContentType: "video/mp4", Filename: "video.mp4", CustomSlug: false, Overwrite: false})
 
 	req := httptest.NewRequest("GET", "/clip", nil)
 	w := httptest.NewRecorder()
@@ -958,7 +958,7 @@ func TestHandleViewCode(t *testing.T) {
 	srv, store := newTestServer()
 	e := newTestEcho(srv)
 
-	store.Put(nil, "code1", bytes.NewReader([]byte("package main\n")), "text/plain; charset=utf-8", "main.go", false, false)
+	store.Put(nil, "code1", bytes.NewReader([]byte("package main\n")), storage.PutOptions{ContentType: "text/plain; charset=utf-8", Filename: "main.go", CustomSlug: false, Overwrite: false})
 
 	req := httptest.NewRequest("GET", "/code1", nil)
 	w := httptest.NewRecorder()
@@ -986,7 +986,7 @@ func TestHandleViewCodePython(t *testing.T) {
 	srv, store := newTestServer()
 	e := newTestEcho(srv)
 
-	store.Put(nil, "pyfile", bytes.NewReader([]byte("print('hello')\n")), "text/plain; charset=utf-8", "script.py", false, false)
+	store.Put(nil, "pyfile", bytes.NewReader([]byte("print('hello')\n")), storage.PutOptions{ContentType: "text/plain; charset=utf-8", Filename: "script.py", CustomSlug: false, Overwrite: false})
 
 	req := httptest.NewRequest("GET", "/pyfile", nil)
 	w := httptest.NewRecorder()
@@ -1002,7 +1002,7 @@ func TestHandleViewCSV(t *testing.T) {
 	srv, store := newTestServer()
 	e := newTestEcho(srv)
 
-	store.Put(nil, "csvfile", bytes.NewReader([]byte("a,b,c\n1,2,3\n")), "text/csv; charset=utf-8", "data.csv", false, false)
+	store.Put(nil, "csvfile", bytes.NewReader([]byte("a,b,c\n1,2,3\n")), storage.PutOptions{ContentType: "text/csv; charset=utf-8", Filename: "data.csv", CustomSlug: false, Overwrite: false})
 
 	req := httptest.NewRequest("GET", "/csvfile", nil)
 	w := httptest.NewRecorder()
@@ -1033,7 +1033,7 @@ func TestHandleViewHTMLNotCode(t *testing.T) {
 	srv, store := newTestServer()
 	e := newTestEcho(srv)
 
-	store.Put(nil, "htmlpage", bytes.NewReader([]byte("<html><body>Hello</body></html>")), "text/html; charset=utf-8", "index.html", false, false)
+	store.Put(nil, "htmlpage", bytes.NewReader([]byte("<html><body>Hello</body></html>")), storage.PutOptions{ContentType: "text/html; charset=utf-8", Filename: "index.html", CustomSlug: false, Overwrite: false})
 
 	req := httptest.NewRequest("GET", "/htmlpage", nil)
 	w := httptest.NewRecorder()
@@ -1058,7 +1058,7 @@ func TestHandleViewOGTags(t *testing.T) {
 	srv, store := newTestServer()
 	e := newTestEcho(srv)
 
-	store.Put(nil, "og-test", bytes.NewReader([]byte("hello")), "text/plain; charset=utf-8", "hello.txt", false, false)
+	store.Put(nil, "og-test", bytes.NewReader([]byte("hello")), storage.PutOptions{ContentType: "text/plain; charset=utf-8", Filename: "hello.txt", CustomSlug: false, Overwrite: false})
 
 	req := httptest.NewRequest("GET", "/og-test", nil)
 	w := httptest.NewRecorder()
@@ -1092,7 +1092,7 @@ func TestHandleViewOGTagsOnImage(t *testing.T) {
 	srv, store := newTestServer()
 	e := newTestEcho(srv)
 
-	store.Put(nil, "ogimg", bytes.NewReader([]byte("PNG...")), "image/png", "photo.png", false, false)
+	store.Put(nil, "ogimg", bytes.NewReader([]byte("PNG...")), storage.PutOptions{ContentType: "image/png", Filename: "photo.png", CustomSlug: false, Overwrite: false})
 
 	req := httptest.NewRequest("GET", "/ogimg", nil)
 	w := httptest.NewRecorder()
@@ -1111,7 +1111,7 @@ func TestHandleViewImageStillWorks(t *testing.T) {
 	srv, store := newTestServer()
 	e := newTestEcho(srv)
 
-	store.Put(nil, "img1", bytes.NewReader([]byte("PNG...")), "image/png", "photo.png", false, false)
+	store.Put(nil, "img1", bytes.NewReader([]byte("PNG...")), storage.PutOptions{ContentType: "image/png", Filename: "photo.png", CustomSlug: false, Overwrite: false})
 
 	req := httptest.NewRequest("GET", "/img1", nil)
 	w := httptest.NewRecorder()
@@ -1133,7 +1133,7 @@ func TestHandleViewDownloadFallback(t *testing.T) {
 	srv, store := newTestServer()
 	e := newTestEcho(srv)
 
-	store.Put(nil, "binfile", bytes.NewReader([]byte{0x00, 0x01}), "application/octet-stream", "data.bin", false, false)
+	store.Put(nil, "binfile", bytes.NewReader([]byte{0x00, 0x01}), storage.PutOptions{ContentType: "application/octet-stream", Filename: "data.bin", CustomSlug: false, Overwrite: false})
 
 	req := httptest.NewRequest("GET", "/binfile", nil)
 	w := httptest.NewRecorder()
@@ -1152,7 +1152,7 @@ func TestHandleViewDocx(t *testing.T) {
 	srv, store := newTestServer()
 	e := newTestEcho(srv)
 
-	store.Put(nil, "docfile", bytes.NewReader([]byte("PK\x03\x04...")), "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "report.docx", false, false)
+	store.Put(nil, "docfile", bytes.NewReader([]byte("PK\x03\x04...")), storage.PutOptions{ContentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", Filename: "report.docx", CustomSlug: false, Overwrite: false})
 
 	req := httptest.NewRequest("GET", "/docfile", nil)
 	w := httptest.NewRecorder()
@@ -1187,7 +1187,7 @@ func TestHandleViewDocxNotCode(t *testing.T) {
 	srv, store := newTestServer()
 	e := newTestEcho(srv)
 
-	store.Put(nil, "doc2", bytes.NewReader([]byte("PK...")), "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "notes.docx", false, false)
+	store.Put(nil, "doc2", bytes.NewReader([]byte("PK...")), storage.PutOptions{ContentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", Filename: "notes.docx", CustomSlug: false, Overwrite: false})
 
 	req := httptest.NewRequest("GET", "/doc2", nil)
 	w := httptest.NewRecorder()
@@ -1293,7 +1293,7 @@ func TestHandleDelete(t *testing.T) {
 	e.DELETE("/delete/:slug", srv.handleDelete)
 
 	// Seed a file
-	store.Put(t.Context(), "del-me", strings.NewReader("bye"), "text/plain", "bye.txt", true, false)
+	store.Put(t.Context(), "del-me", strings.NewReader("bye"), storage.PutOptions{ContentType: "text/plain", Filename: "bye.txt", CustomSlug: true, Overwrite: false})
 
 	req := httptest.NewRequest("DELETE", "/delete/del-me", nil)
 	w := httptest.NewRecorder()

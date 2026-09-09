@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -81,8 +80,8 @@ func newS3Store(ctx context.Context, cfg S3Config) (Store, error) {
 	return &s3Store{client: client, bucket: cfg.Bucket}, nil
 }
 
-func (s *s3Store) Put(ctx context.Context, slug string, body io.Reader, contentType, filename string, customSlug, overwrite bool) error {
-	if !overwrite {
+func (s *s3Store) Put(ctx context.Context, slug string, body io.Reader, opts PutOptions) error {
+	if !opts.Overwrite {
 		_, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{
 			Bucket: aws.String(s.bucket),
 			Key:    aws.String(slug),
@@ -102,15 +101,18 @@ func (s *s3Store) Put(ctx context.Context, slug string, body io.Reader, contentT
 		}
 	}
 
-	meta := map[string]string{"filename": filename}
-	if customSlug {
+	meta := map[string]string{"filename": opts.Filename}
+	if opts.OwnerEmail != "" {
+		meta["owner-email"] = opts.OwnerEmail
+	}
+	if opts.CustomSlug {
 		meta["custom-slug"] = "true"
 	}
 	if _, err := s.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(s.bucket),
 		Key:         aws.String(slug),
 		Body:        body,
-		ContentType: aws.String(contentType),
+		ContentType: aws.String(opts.ContentType),
 		Metadata:    meta,
 	}); err != nil {
 		return fmt.Errorf("putting object: %w", err)
@@ -144,6 +146,7 @@ func (s *s3Store) Get(ctx context.Context, slug string, rangeHeader string) (io.
 	meta := &FileMetadata{
 		ContentType:    aws.ToString(out.ContentType),
 		Filename:       out.Metadata["filename"],
+		OwnerEmail:     out.Metadata["owner-email"],
 		Version:        strings.Trim(aws.ToString(out.ETag), `"`),
 		CustomSlug:     out.Metadata["custom-slug"] == "true",
 		Flagged:        out.Metadata["intake-flagged"] == "true",
@@ -209,6 +212,7 @@ func (s *s3Store) Metadata(ctx context.Context, slug string) (*FileMetadata, err
 	return &FileMetadata{
 		ContentType:    aws.ToString(out.ContentType),
 		Filename:       out.Metadata["filename"],
+		OwnerEmail:     out.Metadata["owner-email"],
 		Version:        strings.Trim(aws.ToString(out.ETag), `"`),
 		CustomSlug:     out.Metadata["custom-slug"] == "true",
 		Flagged:        out.Metadata["intake-flagged"] == "true",
@@ -219,80 +223,6 @@ func (s *s3Store) Metadata(ctx context.Context, slug string) (*FileMetadata, err
 
 func manifestKey(userID string) string {
 	return "_users/" + userID + ".json"
-}
-
-func (s *s3Store) getManifest(ctx context.Context, userID string) (*UserManifest, error) {
-	out, err := s.client.GetObject(ctx, &s3.GetObjectInput{
-		Bucket: aws.String(s.bucket),
-		Key:    aws.String(manifestKey(userID)),
-	})
-	if err != nil {
-		var nsk *types.NoSuchKey
-		if errors.As(err, &nsk) {
-			return &UserManifest{}, nil
-		}
-		var apiErr interface{ ErrorCode() string }
-		if errors.As(err, &apiErr) {
-			if code := apiErr.ErrorCode(); code == "NoSuchKey" || code == "NotFound" {
-				return &UserManifest{}, nil
-			}
-		}
-		return nil, fmt.Errorf("getting manifest: %w", err)
-	}
-	defer out.Body.Close()
-
-	var m UserManifest
-	if err := json.NewDecoder(out.Body).Decode(&m); err != nil {
-		return &UserManifest{}, nil
-	}
-	return &m, nil
-}
-
-func (s *s3Store) putManifest(ctx context.Context, userID string, m *UserManifest) error {
-	data, err := json.Marshal(m)
-	if err != nil {
-		return fmt.Errorf("marshaling manifest: %w", err)
-	}
-	_, err = s.client.PutObject(ctx, &s3.PutObjectInput{
-		Bucket:      aws.String(s.bucket),
-		Key:         aws.String(manifestKey(userID)),
-		Body:        bytes.NewReader(data),
-		ContentType: aws.String("application/json"),
-	})
-	if err != nil {
-		return fmt.Errorf("putting manifest: %w", err)
-	}
-	return nil
-}
-
-func (s *s3Store) RecordUpload(ctx context.Context, userID string, record ActivityRecord) error {
-	m, err := s.getManifest(ctx, userID)
-	if err != nil {
-		return err
-	}
-	record.At = time.Now().UTC().Format(time.RFC3339)
-	m.Uploads = append(m.Uploads, record)
-	return s.putManifest(ctx, userID, m)
-}
-
-func (s *s3Store) RecordView(ctx context.Context, userID string, record ActivityRecord) error {
-	m, err := s.getManifest(ctx, userID)
-	if err != nil {
-		return err
-	}
-	record.At = time.Now().UTC().Format(time.RFC3339)
-	for i, v := range m.Views {
-		if v.Slug == record.Slug {
-			m.Views[i] = record
-			return s.putManifest(ctx, userID, m)
-		}
-	}
-	m.Views = append(m.Views, record)
-	return s.putManifest(ctx, userID, m)
-}
-
-func (s *s3Store) GetManifest(ctx context.Context, userID string) (*UserManifest, error) {
-	return s.getManifest(ctx, userID)
 }
 
 func siteManifestKey(siteSlug string) string {

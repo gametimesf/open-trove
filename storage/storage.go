@@ -21,7 +21,7 @@ var (
 type Store interface {
 	comments.Repository
 
-	Put(ctx context.Context, slug string, body io.Reader, contentType, filename string, customSlug, overwrite bool) error
+	Put(ctx context.Context, slug string, body io.Reader, opts PutOptions) error
 	Get(ctx context.Context, slug string, rangeHeader string) (io.ReadCloser, *FileMetadata, error)
 	Delete(ctx context.Context, slug string) error
 	Metadata(ctx context.Context, slug string) (*FileMetadata, error)
@@ -35,16 +35,28 @@ type Store interface {
 	HeadSiteFile(ctx context.Context, siteSlug, path string) (*FileMetadata, error)
 	HeadSite(ctx context.Context, siteSlug string) (bool, error)
 	PutSiteManifest(ctx context.Context, siteSlug string, m *SiteManifest) error
+	GetSiteManifest(ctx context.Context, siteSlug string) (*SiteManifest, error)
+}
+
+// PutOptions describes a file upload, including attribution (not authorization).
+type PutOptions struct {
+	ContentType string
+	Filename    string
+	OwnerEmail  string
+	CustomSlug  bool
+	Overwrite   bool
 }
 
 // SiteManifest tracks metadata for a multi-file site upload.
 type SiteManifest struct {
-	Entry     string `json:"entry"`
-	FileCount int    `json:"file_count"`
+	Entry      string `json:"entry"`
+	FileCount  int    `json:"file_count"`
+	OwnerEmail string `json:"owner_email,omitempty"`
 }
 
 // FileMetadata holds metadata about a stored file.
 type FileMetadata struct {
+	OwnerEmail     string // uploader attribution, not verified ownership
 	ContentType    string
 	Filename       string
 	Version        string // storage-backed version identifier, currently the S3 ETag
@@ -62,6 +74,7 @@ type ActivityRecord struct {
 	Filename    string `json:"filename"`
 	ContentType string `json:"content_type"`
 	UserEmail   string `json:"user_email,omitempty"`
+	OwnerEmail  string `json:"owner_email,omitempty"`
 	At          string `json:"at"`
 }
 
