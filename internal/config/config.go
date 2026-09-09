@@ -8,19 +8,22 @@ import (
 	"os"
 	"path"
 	"strings"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 )
 
 // Config is the top-level application configuration.
 type Config struct {
-	Port          string         `yaml:"port"`
-	BaseURL       string         `yaml:"base_url"`
-	Store         Store          `yaml:"store"`
-	Intake        Intake         `yaml:"intake"`
-	Uploads       Uploads        `yaml:"uploads"`
-	ShareURLRules []ShareURLRule `yaml:"share_url_rules"`
-	ContentReview ContentReview  `yaml:"content_review"`
+	// Nil selects the embedded default; a configured override must be non-blank.
+	LLMSTxtOverride *string        `yaml:"llms_txt_override"`
+	Port            string         `yaml:"port"`
+	BaseURL         string         `yaml:"base_url"`
+	Store           Store          `yaml:"store"`
+	Intake          Intake         `yaml:"intake"`
+	Uploads         Uploads        `yaml:"uploads"`
+	ShareURLRules   []ShareURLRule `yaml:"share_url_rules"`
+	ContentReview   ContentReview  `yaml:"content_review"`
 }
 
 // Uploads bounds request and ZIP expansion costs. All byte values are literal
@@ -172,6 +175,18 @@ func decodeStrict(data []byte, cfg *Config) error {
 // Validate rejects configuration that would produce ambiguous or unsafe URLs
 // and non-positive resource limits.
 func (c *Config) Validate() error {
+	if c.LLMSTxtOverride != nil {
+		content := *c.LLMSTxtOverride
+		switch {
+		case !utf8.ValidString(content):
+			return fmt.Errorf("config: llms_txt_override must be valid UTF-8")
+		case strings.TrimSpace(content) == "":
+			return fmt.Errorf("config: llms_txt_override must not be blank")
+		case len(content) > 64<<10:
+			return fmt.Errorf("config: llms_txt_override must not exceed 65536 bytes")
+		}
+	}
+
 	if strings.TrimSpace(c.Port) == "" {
 		return fmt.Errorf("config: port is required")
 	}

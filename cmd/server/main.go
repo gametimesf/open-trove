@@ -40,11 +40,12 @@ func main() {
 	}
 
 	srv := &server{
-		store:      store,
-		comments:   comments.NewService(store),
-		baseURL:    cfg.BaseURL,
-		intake:     inspector,
-		intakeFail: failMode,
+		llmsTxtOverride: cfg.LLMSTxtOverride,
+		store:           store,
+		comments:        comments.NewService(store),
+		baseURL:         cfg.BaseURL,
+		intake:          inspector,
+		intakeFail:      failMode,
 		uploads: uploadLimits{
 			maxBytes:         cfg.Uploads.MaxBytes,
 			maxSiteFiles:     cfg.Uploads.MaxSiteFiles,
@@ -99,7 +100,7 @@ func registerRoutes(e *echo.Echo, srv *server) {
 	e.GET("/healthz", healthHandler)
 	e.GET("/identity.js", handleUserIdentityJS)
 	registerCommentAssets(e)
-	registerLLMsTxtRoute(e)
+	registerLLMsTxtRoute(e, srv.llmsTxtOverride)
 	e.GET("/.well-known/agent.json", srv.handleAgentJSON)
 	e.GET("/swagger/*", echoSwagger.WrapHandler)
 	e.File("/openapi.json", "docs/openapi.json")
