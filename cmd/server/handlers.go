@@ -22,14 +22,15 @@ import (
 )
 
 type server struct {
-	store         storage.Store
-	comments      *comments.Service
-	baseURL       string
-	shareURLRules []shareURLRule
-	contentReview contentReview
-	uploads       uploadLimits
-	intake        intake.Inspector // intake.NoOp{} when feature disabled
-	intakeFail    intake.FailMode  // closed (default) or open
+	llmsTxtOverride *string
+	store           storage.Store
+	comments        *comments.Service
+	baseURL         string
+	shareURLRules   []shareURLRule
+	contentReview   contentReview
+	uploads         uploadLimits
+	intake          intake.Inspector // intake.NoOp{} when feature disabled
+	intakeFail      intake.FailMode  // closed (default) or open
 }
 
 type shareURLRule struct {
