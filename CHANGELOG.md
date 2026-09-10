@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/gametimesf/open-trove/compare/open-trove-v1.1.1...open-trove-v1.2.0) (2026-09-10)
+
+
+### Features
+
+* support deployment-owned llms.txt overrides ([#17](https://github.com/gametimesf/open-trove/issues/17)) ([5b01bfd](https://github.com/gametimesf/open-trove/commit/5b01bfd5d286f67f58ef3f9d2d8f04b7eb4de489))
+
 ## [1.1.1](https://github.com/gametimesf/open-trove/compare/open-trove-v1.1.0...open-trove-v1.1.1) (2026-09-09)
 
 
