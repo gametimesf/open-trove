@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/gametimesf/open-trove/compare/open-trove-v1.3.0...open-trove-v1.4.0) (2026-09-14)
+
+
+### Features
+
+* support operator-owned image builds ([#21](https://github.com/gametimesf/open-trove/issues/21)) ([e4f6276](https://github.com/gametimesf/open-trove/commit/e4f6276ce5af66ad9b0a7b45384634421b1f9f46))
+
 ## [1.3.0](https://github.com/gametimesf/open-trove/compare/open-trove-v1.2.0...open-trove-v1.3.0) (2026-09-14)
 
 
