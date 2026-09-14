@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/gametimesf/open-trove/compare/open-trove-v1.2.0...open-trove-v1.3.0) (2026-09-14)
+
+
+### Features
+
+* extend the embedded agent guide with local instructions ([#19](https://github.com/gametimesf/open-trove/issues/19)) ([506b638](https://github.com/gametimesf/open-trove/commit/506b638bd8497e0d73928dd00bd77737587b47d0))
+
 ## [1.2.0](https://github.com/gametimesf/open-trove/compare/open-trove-v1.1.1...open-trove-v1.2.0) (2026-09-10)
 
 
