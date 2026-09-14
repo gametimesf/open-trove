@@ -233,40 +233,47 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md) and
 
 ## Deployment-owned agent documentation
 
-By default, `/llms.txt` serves the document embedded in the release. Set the
-optional `llms_txt_override` configuration field to replace it with your own
-text. It works in a configuration file or the existing `TROVE_CONFIG_YAML`
-channel; no remote document store or runtime fetch is involved.
+By default, `/llms.txt` serves the full agent/API guide embedded in the release.
+To **extend that guide without copying or losing it**, set `llms_txt_append`:
 
 ```yaml
-llms_txt_override: |
-  # Team documentation
-  Follow this deployment's authoring and publishing guidelines.
+llms_txt_append: |
+  ## Team authoring guidelines
+  Use our document design conventions and include editable diagram source.
 ```
 
-An omitted or null value selects the embedded default. A non-null override
-must be non-blank UTF-8 text, at most 65,536 bytes. Invalid content fails startup;
-valid content is served verbatim as `text/plain`, including trailing newlines.
-Content is selected once at startup. Updating it requires a restart/deployment.
-The startup log reports the selected source and, for an override, its byte
-length and SHA-256—not the document body.
+The response is the embedded guide, two newline characters, then the configured
+appendix. Both input documents are preserved byte-for-byte. The default guide
+therefore follows the installed release automatically, and clients get the full
+API instructions and local guidance in one request. No template evaluation,
+remote document store, runtime fetch, or copied upstream reference is involved.
 
-For a repo-local text file, let your deployment tooling read the file and merge
-it into configuration. For example, Terraform can compose an existing YAML
-configuration without duplicating the document in YAML:
+For deployments that intentionally replace the entire guide, the existing
+`llms_txt_override` field still serves its content verbatim. The two modes are
+mutually exclusive: configuring both fails startup instead of silently dropping
+content. When switching modes across configuration layers, explicitly set the
+old field to null. Omitted/null fields select the unchanged embedded default.
+
+Both fields accept non-blank UTF-8 text up to 65,536 bytes (the append limit applies
+to the appendix, not the embedded guide). Invalid configuration fails startup.
+GET/HEAD, `text/plain`, content lengths, and range requests apply to the selected
+whole document. Content is captured once at startup; changes require redeployment.
+For configured content, logs report source, response byte count and SHA-256,
+never the document body.
+
+Keep local guidance in a normal text file and let deployment tooling compose the
+existing configuration, for example:
 
 ```hcl
 config_yaml = yamlencode(merge(
   yamldecode(file("${path.module}/deployment.yaml")),
-  { llms_txt_override = file("${path.module}/docs/llms.txt") }
+  { llms_txt_append = file("${path.module}/docs/llms.txt") }
 ))
 ```
 
-Pass that result through `TROVE_CONFIG_YAML`. Documentation-only changes do not
-require rebuilding the application image, but do require updating the task's
-configuration and redeploying. Deploy a supporting image before adding the new
-field; remove the field before rolling back to an older, unsupported image.
-Keep the document non-secret: it is served to readers and may also be visible
-in deployment configuration/state. Do not reuse upload-intake review prompts.
-A full override owns its content; link to the canonical API documentation
-rather than copying an API reference that could become stale.
+Pass that result through `TROVE_CONFIG_YAML`. Documentation-only changes require
+configuration update/redeployment, not application image rebuilds. Append support
+requires a newer image than override support: ship a supporting image before
+adding the field; remove the new field before rollback to unsupported binaries.
+Keep reader-facing guidance non-secret; deployment configuration/state can expose
+it too. Do not reuse private upload-intake review prompts.

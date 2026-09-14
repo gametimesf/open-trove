@@ -22,6 +22,7 @@ import (
 )
 
 type server struct {
+	llmsTxtAppend   *string
 	llmsTxtOverride *string
 	store           storage.Store
 	comments        *comments.Service
