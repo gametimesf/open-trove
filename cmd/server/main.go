@@ -41,6 +41,7 @@ func main() {
 
 	srv := &server{
 		llmsTxtOverride: cfg.LLMSTxtOverride,
+		llmsTxtAppend:   cfg.LLMSTxtAppend,
 		store:           store,
 		comments:        comments.NewService(store),
 		baseURL:         cfg.BaseURL,
@@ -100,7 +101,7 @@ func registerRoutes(e *echo.Echo, srv *server) {
 	e.GET("/healthz", healthHandler)
 	e.GET("/identity.js", handleUserIdentityJS)
 	registerCommentAssets(e)
-	registerLLMsTxtRoute(e, srv.llmsTxtOverride)
+	registerLLMsTxtRoute(e, srv.llmsTxtOverride, srv.llmsTxtAppend)
 	e.GET("/.well-known/agent.json", srv.handleAgentJSON)
 	e.GET("/swagger/*", echoSwagger.WrapHandler)
 	e.File("/openapi.json", "docs/openapi.json")

@@ -74,3 +74,47 @@ func TestLLMSTxtOverrideIsSnapshotAtRegistration(t *testing.T) {
 }
 
 func stringPointerForLLMS(s string) *string { return &s }
+
+func TestLLMSTxtAppendPreservesEmbeddedGuide(t *testing.T) {
+	embedded, err := trovedocs.Files.ReadFile("llms.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := "  ## Authoring\r\nCafé → diagrams\n\n"
+	appendix := original
+	srv, _ := newTestServer()
+	srv.llmsTxtAppend = &appendix
+	e := newTestEcho(srv)
+	appendix = "must not change startup content"
+	want := string(embedded) + "\n\n" + original
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		t.Run(method, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			e.ServeHTTP(w, httptest.NewRequest(method, "/llms.txt", nil))
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d", w.Code)
+			}
+			if !strings.HasPrefix(w.Header().Get("Content-Type"), "text/plain") {
+				t.Fatal("wrong content type")
+			}
+			if w.Header().Get("Content-Length") != strconv.Itoa(len(want)) {
+				t.Fatal("wrong content length")
+			}
+			wantBody := want
+			if method == http.MethodHead {
+				wantBody = ""
+			}
+			if w.Body.String() != wantBody {
+				t.Fatal("embedded guide or appendix changed")
+			}
+		})
+	}
+	// The composed document retains HTTP range semantics.
+	req := httptest.NewRequest(http.MethodGet, "/llms.txt", nil)
+	req.Header.Set("Range", "bytes=0-6")
+	w := httptest.NewRecorder()
+	e.ServeHTTP(w, req)
+	if w.Code != http.StatusPartialContent || w.Body.String() != want[:7] {
+		t.Fatalf("range: %d %q", w.Code, w.Body.String())
+	}
+}

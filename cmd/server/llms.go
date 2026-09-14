@@ -18,8 +18,8 @@ import (
 // @Produce plain
 // @Success 200 {string} string "Plain-text API docs"
 // @Router /llms.txt [get]
-func registerLLMsTxtRoute(e *echo.Echo, override *string) {
-	if override == nil {
+func registerLLMsTxtRoute(e *echo.Echo, override, appendix *string) {
+	if override == nil && appendix == nil {
 		e.FileFS("/llms.txt", "llms.txt", trovedocs.Files)
 		e.HEAD("/llms.txt", echo.StaticFileHandler("llms.txt", trovedocs.Files))
 		log.Printf("INFO llms.txt: source=embedded")
@@ -28,7 +28,17 @@ func registerLLMsTxtRoute(e *echo.Echo, override *string) {
 
 	// Capture immutable startup content. ServeContent retains file-like GET/HEAD
 	// and range semantics without touching the filesystem or fetching a URL.
-	content := *override
+	var content, source string
+	if appendix != nil {
+		embedded, err := trovedocs.Files.ReadFile("llms.txt")
+		if err != nil {
+			// This is a build invariant: the default guide is compiled into the binary.
+			panic("reading embedded llms.txt: " + err.Error())
+		}
+		content, source = string(embedded)+"\n\n"+*appendix, "embedded+append"
+	} else {
+		content, source = *override, "override"
+	}
 	handler := func(c echo.Context) error {
 		c.Response().Header().Set(echo.HeaderContentType, echo.MIMETextPlainCharsetUTF8)
 		http.ServeContent(c.Response(), c.Request(), "llms.txt", time.Time{}, strings.NewReader(content))
@@ -36,5 +46,5 @@ func registerLLMsTxtRoute(e *echo.Echo, override *string) {
 	}
 	e.GET("/llms.txt", handler)
 	e.HEAD("/llms.txt", handler)
-	log.Printf("INFO llms.txt: source=override bytes=%d sha256=%x", len(content), sha256.Sum256([]byte(content)))
+	log.Printf("INFO llms.txt: source=%s bytes=%d sha256=%x", source, len(content), sha256.Sum256([]byte(content)))
 }

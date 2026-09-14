@@ -15,7 +15,8 @@ import (
 
 // Config is the top-level application configuration.
 type Config struct {
-	// Nil selects the embedded default; a configured override must be non-blank.
+	// Nil selects the embedded default. Append extends it; override replaces it.
+	LLMSTxtAppend   *string        `yaml:"llms_txt_append"`
 	LLMSTxtOverride *string        `yaml:"llms_txt_override"`
 	Port            string         `yaml:"port"`
 	BaseURL         string         `yaml:"base_url"`
@@ -175,15 +176,27 @@ func decodeStrict(data []byte, cfg *Config) error {
 // Validate rejects configuration that would produce ambiguous or unsafe URLs
 // and non-positive resource limits.
 func (c *Config) Validate() error {
-	if c.LLMSTxtOverride != nil {
-		content := *c.LLMSTxtOverride
+	if c.LLMSTxtOverride != nil && c.LLMSTxtAppend != nil {
+		return fmt.Errorf("config: llms_txt_override and llms_txt_append are mutually exclusive")
+	}
+	for _, field := range []struct {
+		name  string
+		value *string
+	}{
+		{"llms_txt_override", c.LLMSTxtOverride},
+		{"llms_txt_append", c.LLMSTxtAppend},
+	} {
+		if field.value == nil {
+			continue
+		}
+		content := *field.value
 		switch {
 		case !utf8.ValidString(content):
-			return fmt.Errorf("config: llms_txt_override must be valid UTF-8")
+			return fmt.Errorf("config: %s must be valid UTF-8", field.name)
 		case strings.TrimSpace(content) == "":
-			return fmt.Errorf("config: llms_txt_override must not be blank")
+			return fmt.Errorf("config: %s must not be blank", field.name)
 		case len(content) > 64<<10:
-			return fmt.Errorf("config: llms_txt_override must not exceed 65536 bytes")
+			return fmt.Errorf("config: %s must not exceed 65536 bytes", field.name)
 		}
 	}
 
