@@ -26,7 +26,7 @@ should serve artifacts from a separate content origin and use a constrained
 
 ## Operator checklist
 
-- Pin released container images by digest.
+- Pin source releases by commit and deploy your own built images by digest.
 - Keep the object bucket private and enable encryption and versioning.
 - Inject provider keys through a secret manager, never configuration files.
 - Set upload, expanded ZIP, file-count, and per-entry limits for your runtime.

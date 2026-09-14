@@ -140,25 +140,42 @@ For orchestrators that cannot mount files, pass the deployment YAML through
 
 ## Self-hosting
 
-### Published image
+### Build your deployment image
 
-Images are published for `linux/amd64` and `linux/arm64`:
+OpenTrove publishes source releases, not hosted container images. Forkers and
+operators build with this repository's Dockerfile and publish to their own
+registry. Pin a source release/commit, build once, and promote the tested image
+by immutable digest between environments.
 
 ```bash
-docker pull ghcr.io/gametimesf/open-trove:latest
-docker run --rm -p 8080:8080 \
-  -e TROVE_CONFIG_YAML="$(cat trove-production.yaml)" \
-  -e AWS_REGION=us-west-2 \
-  ghcr.io/gametimesf/open-trove:latest
+docker build -t your-registry/trove:your-release .
 ```
 
-Production deployments should pin the immutable image digest rather than
-`latest`.
-
-### Build locally
+To incorporate local authoring guidance at build time, put the file inside the
+build context and outside paths excluded by `.dockerignore`:
 
 ```bash
-docker build -t open-trove .
+docker build --build-arg LLMS_TXT_APPEND=custom/llms.txt \
+  -t your-registry/trove:your-release .
+```
+
+The build embeds the complete default guide + two newline characters + the exact
+appendix. To deliberately replace the entire guide instead, use
+`LLMS_TXT_OVERRIDE=custom/llms.txt`. The modes are mutually exclusive. Without
+either argument, the default guide is unchanged. Paths are build-context files,
+not URLs. Missing files, blank/non-UTF-8 text, and customization over 65,536 bytes
+fail the build. Keep custom files non-secret: the guide is served to readers and
+included in the image. Editing the source file requires a rebuild and deploy,
+not infrastructure configuration changes.
+
+Do not also configure runtime `llms_txt_append` when the appendix is already
+baked in, or it will be appended twice. Runtime override remains an explicit
+replacement of the entire built guide. Configuration and secrets should still
+be supplied at deployment, not copied into the build context.
+
+For a local binary without Docker:
+
+```bash
 go build -o trove ./cmd/server
 ```
 
@@ -261,19 +278,8 @@ whole document. Content is captured once at startup; changes require redeploymen
 For configured content, logs report source, response byte count and SHA-256,
 never the document body.
 
-Keep local guidance in a normal text file and let deployment tooling compose the
-existing configuration, for example:
-
-```hcl
-config_yaml = yamlencode(merge(
-  yamldecode(file("${path.module}/deployment.yaml")),
-  { llms_txt_append = file("${path.module}/docs/llms.txt") }
-))
-```
-
-Pass that result through `TROVE_CONFIG_YAML`. Documentation-only changes require
-configuration update/redeployment, not application image rebuilds. Append support
-requires a newer image than override support: ship a supporting image before
-adding the field; remove the new field before rollback to unsupported binaries.
-Keep reader-facing guidance non-secret; deployment configuration/state can expose
-it too. Do not reuse private upload-intake review prompts.
+For repo-local authoring guidance, prefer the Dockerfile's build-time arguments
+above. Runtime customization remains supported for deployments that explicitly
+choose to manage the guide as configuration. Remove runtime append/override
+settings when migrating that content into the build; otherwise they still apply
+to the built guide. No remote document store or runtime fetch is involved.

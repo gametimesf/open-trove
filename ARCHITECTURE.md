@@ -23,7 +23,7 @@ an `Inspector`; disabled deployments receive a no-op implementation.
 
 ## Deployment boundary
 
-This repository owns the portable application and its OCI image. A deployment
+This repository owns the portable application and its Docker build definition. A deployment
 repository should own cloud infrastructure, authentication policy, secrets,
 environment YAML, and promotion of an immutable image digest. Deployment-only
 behavior belongs in configuration, not a private application fork.
