@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"image/png"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gametimesf/open-trove/internal/favicon"
 	"github.com/gametimesf/open-trove/storage"
 	"github.com/gametimesf/open-trove/storage/fake"
 	"github.com/labstack/echo/v4"
@@ -20,6 +22,7 @@ func newTestServer() (*server, *fake.Store) {
 	srv := &server{
 		store:   store,
 		baseURL: "http://localhost:8080",
+		intn:    func(int) int { return 0 },
 	}
 	return srv, store
 }
@@ -73,6 +76,91 @@ func TestHandleIndex(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "trove") {
 		t.Error("expected page to contain 'trove'")
+	}
+	for _, link := range []string{
+		`<link rel="icon" type="image/png" sizes="32x32" href="/favicon.png">`,
+		`<link rel="icon" type="image/svg+xml" href="/favicon.svg">`,
+		`<link rel="apple-touch-icon" href="/apple-touch-icon.png">`,
+	} {
+		if !strings.Contains(w.Body.String(), link) {
+			t.Errorf("expected page to contain %s", link)
+		}
+	}
+}
+
+func TestHandleStaticIcons(t *testing.T) {
+	tests := []struct {
+		path     string
+		wantSize int
+	}{
+		{"/favicon.png", 32},
+		{"/apple-touch-icon.png", 180},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			srv, _ := newTestServer()
+			e := newTestEcho(srv)
+
+			req := httptest.NewRequest("GET", tt.path, nil)
+			w := httptest.NewRecorder()
+			e.ServeHTTP(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d", w.Code)
+			}
+			if ct := w.Header().Get("Content-Type"); ct != "image/png" {
+				t.Errorf("expected image/png, got %q", ct)
+			}
+			if cc := w.Header().Get("Cache-Control"); cc != staticIconMaxAge {
+				t.Errorf("expected Cache-Control %q, got %q", staticIconMaxAge, cc)
+			}
+			cfg, err := png.DecodeConfig(w.Body)
+			if err != nil {
+				t.Fatalf("decoding png: %v", err)
+			}
+			if cfg.Width != tt.wantSize || cfg.Height != tt.wantSize {
+				t.Errorf("expected %dx%d, got %dx%d", tt.wantSize, tt.wantSize, cfg.Width, cfg.Height)
+			}
+		})
+	}
+}
+
+func TestHandleFavicon(t *testing.T) {
+	tests := []struct {
+		name      string
+		intn      func(int) int
+		wantColor string
+	}{
+		{"first palette", func(int) int { return 0 }, favicon.Palettes[0].From},
+		{"last palette", func(n int) int { return n - 1 }, favicon.Palettes[len(favicon.Palettes)-1].From},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv, _ := newTestServer()
+			srv.intn = tt.intn
+			e := newTestEcho(srv)
+
+			req := httptest.NewRequest("GET", "/favicon.svg", nil)
+			w := httptest.NewRecorder()
+			e.ServeHTTP(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d", w.Code)
+			}
+			if ct := w.Header().Get("Content-Type"); ct != "image/svg+xml" {
+				t.Errorf("expected image/svg+xml, got %q", ct)
+			}
+			if cc := w.Header().Get("Cache-Control"); cc != "no-store" {
+				t.Errorf("expected Cache-Control no-store, got %q", cc)
+			}
+			body := w.Body.String()
+			if !strings.HasPrefix(body, "<svg") {
+				t.Errorf("expected an SVG document, got %q", body[:min(len(body), 40)])
+			}
+			if !strings.Contains(body, tt.wantColor) {
+				t.Errorf("expected palette color %s in SVG", tt.wantColor)
+			}
+		})
 	}
 }
 

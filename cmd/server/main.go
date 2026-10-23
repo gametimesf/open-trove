@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"log"
+	"math/rand/v2"
 	"net/http"
 
 	mcpserver "github.com/BrunoKrugel/echo-mcp"
@@ -35,6 +36,7 @@ func main() {
 	srv := &server{
 		store:   store,
 		baseURL: cfg.BaseURL,
+		intn:    rand.IntN,
 	}
 
 	e := echo.New()
@@ -48,7 +50,7 @@ func main() {
 	})
 	// TODO: echo-mcp matches by path only, not method — can't exclude DELETE /:slug
 	// while keeping GET /:slug. Workaround: DELETE is at /delete/:slug, excluded from MCP.
-	mcp.ExcludeEndpoints([]string{"/healthz", "/swagger/*", "/mcp", "/delete/*"})
+	mcp.ExcludeEndpoints([]string{"/healthz", "/favicon.svg", "/favicon.png", "/apple-touch-icon.png", "/swagger/*", "/mcp", "/delete/*"})
 	if err := mcp.Mount("/mcp"); err != nil {
 		log.Fatalf("mounting MCP server: %v", err)
 	}
@@ -63,6 +65,9 @@ func main() {
 func registerRoutes(e *echo.Echo, srv *server) {
 	// Public routes
 	e.GET("/healthz", healthHandler)
+	e.GET("/favicon.svg", srv.handleFavicon)
+	e.GET("/favicon.png", handleFaviconPNG)
+	e.GET("/apple-touch-icon.png", handleAppleTouchIcon)
 	e.GET("/llms.txt", srv.handleLLMsTxt)
 	e.GET("/.well-known/agent.json", srv.handleAgentJSON)
 	e.GET("/swagger/*", echoSwagger.WrapHandler)
