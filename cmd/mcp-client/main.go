@@ -2,7 +2,7 @@
 //
 // Usage:
 //
-//	mcp-client [-url <base-url>] <command>
+//	mcp-client [-url <base-url>] [-email <address>] <command>
 //
 // Commands:
 //
@@ -29,6 +29,7 @@ import (
 )
 
 const defaultURL = "http://localhost:8080"
+const userEmailHeader = "X-Trove-User-Email"
 
 // ─── JSON-RPC types ──────────────────────────────────────────────
 
@@ -53,12 +54,13 @@ type jsonrpcResponse struct {
 
 type mcpClient struct {
 	baseURL   string
+	email     string
 	sessionID string
 	nextID    int
 }
 
-func newMCPClient(baseURL string) *mcpClient {
-	return &mcpClient{baseURL: baseURL, nextID: 1}
+func newMCPClient(baseURL, email string) *mcpClient {
+	return &mcpClient{baseURL: baseURL, email: email, nextID: 1}
 }
 
 func (c *mcpClient) call(method string, params any) (*jsonrpcResponse, error) {
@@ -68,6 +70,7 @@ func (c *mcpClient) call(method string, params any) (*jsonrpcResponse, error) {
 	body, _ := json.Marshal(req)
 	httpReq, _ := http.NewRequest("POST", c.baseURL+"/mcp", bytes.NewReader(body))
 	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set(userEmailHeader, c.email)
 	if c.sessionID != "" {
 		httpReq.Header.Set("Mcp-Session-Id", c.sessionID)
 	}
@@ -100,8 +103,8 @@ func (c *mcpClient) call(method string, params any) (*jsonrpcResponse, error) {
 func (c *mcpClient) initialize() error {
 	_, err := c.call("initialize", map[string]any{
 		"protocolVersion": "2024-11-05",
-		"capabilities":   map[string]any{},
-		"clientInfo":     map[string]any{"name": "trove-mcp-client", "version": "1.0"},
+		"capabilities":    map[string]any{},
+		"clientInfo":      map[string]any{"name": "trove-mcp-client", "version": "1.0"},
 	})
 	return err
 }
@@ -147,6 +150,29 @@ func (c *mcpClient) callTool(name string, args map[string]any) (string, error) {
 }
 
 // ─── HTTP helpers ────────────────────────────────────────────────
+
+type identityTransport struct {
+	base  http.RoundTripper
+	email string
+}
+
+func (t identityTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	cloned := req.Clone(req.Context())
+	cloned.Header = req.Header.Clone()
+	cloned.Header.Set(userEmailHeader, t.email)
+	return t.base.RoundTrip(cloned)
+}
+
+func newHTTPClient(email string) *http.Client {
+	jar, _ := cookiejar.New(nil)
+	return &http.Client{
+		Jar: jar,
+		Transport: identityTransport{
+			base:  http.DefaultTransport,
+			email: email,
+		},
+	}
+}
 
 func httpGet(client *http.Client, url string) (int, string, http.Header, error) {
 	resp, err := client.Get(url)
@@ -209,9 +235,8 @@ func runSteps(label string, steps []step) bool {
 	return passed == len(steps)
 }
 
-func runHTTP(baseURL string) bool {
-	jar, _ := cookiejar.New(nil)
-	client := &http.Client{Jar: jar}
+func runHTTP(baseURL, email string) bool {
+	client := newHTTPClient(email)
 	slug := "e2e-http-test"
 	content := []byte("# E2E HTTP Test\n\nUploaded by mcp-client.\n")
 
@@ -342,8 +367,8 @@ func runHTTP(baseURL string) bool {
 	})
 }
 
-func runMCP(baseURL string) bool {
-	c := newMCPClient(baseURL)
+func runMCP(baseURL, email string) bool {
+	c := newMCPClient(baseURL, email)
 	slug := "e2e-mcp-test"
 
 	return runSteps("MCP Flow", []step{
@@ -400,8 +425,7 @@ func runMCP(baseURL string) bool {
 			return nil
 		}},
 		{"upload via HTTP (MCP upload requires multipart)", func() error {
-			jar, _ := cookiejar.New(nil)
-			client := &http.Client{Jar: jar}
+			client := newHTTPClient(email)
 			_, err := httpUpload(client, baseURL, "test.md", []byte("# E2E MCP Test\n"), slug, true)
 			return err
 		}},
@@ -443,6 +467,7 @@ func runMCP(baseURL string) bool {
 		}},
 		{"DELETE /{slug} via HTTP", func() error {
 			req, _ := http.NewRequest("DELETE", baseURL+"/delete/"+slug, nil)
+			req.Header.Set(userEmailHeader, email)
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
 				return err
@@ -454,14 +479,11 @@ func runMCP(baseURL string) bool {
 			return nil
 		}},
 		{"confirm deleted via MCP", func() error {
-			text, err := c.callTool("GET_slug_raw", map[string]any{"slug": slug})
-			if err != nil {
-				return nil // error means it properly rejected — good
+			_, err := c.callTool("GET_slug_raw", map[string]any{"slug": slug})
+			if err == nil {
+				return fmt.Errorf("expected error for deleted slug")
 			}
-			if strings.Contains(strings.ToLower(text), "not found") || strings.Contains(text, "404") {
-				return nil // 404 wrapped as content — also fine
-			}
-			return fmt.Errorf("expected error or not-found for deleted slug, got: %s", text[:min(len(text), 100)])
+			return nil
 		}},
 	})
 }
@@ -469,7 +491,7 @@ func runMCP(baseURL string) bool {
 // ─── CLI ─────────────────────────────────────────────────────────
 
 func usage() {
-	fmt.Fprintf(os.Stderr, `Usage: mcp-client [-url <base-url>] <command> [args...]
+	fmt.Fprintf(os.Stderr, `Usage: mcp-client [-url <base-url>] [-email <address>] <command> [args...]
 
 Commands:
   run                   Full end-to-end flow (HTTP + MCP)
@@ -479,12 +501,14 @@ Commands:
   call <tool> [k=v...]  Call an MCP tool
 
 Default URL: %s
+Email: -email or TROVE_USER_EMAIL (required)
 `, defaultURL)
 	os.Exit(1)
 }
 
 func main() {
 	url := defaultURL
+	email := os.Getenv("TROVE_USER_EMAIL")
 	args := os.Args[1:]
 
 	for len(args) > 0 && strings.HasPrefix(args[0], "-") {
@@ -495,6 +519,12 @@ func main() {
 			}
 			url = args[1]
 			args = args[2:]
+		case "-email":
+			if len(args) < 2 {
+				usage()
+			}
+			email = args[1]
+			args = args[2:]
 		default:
 			fmt.Fprintf(os.Stderr, "unknown flag: %s\n", args[0])
 			usage()
@@ -504,11 +534,15 @@ func main() {
 	if len(args) == 0 {
 		usage()
 	}
+	if strings.TrimSpace(email) == "" {
+		fmt.Fprintf(os.Stderr, "user email is required; pass -email or set TROVE_USER_EMAIL\n")
+		os.Exit(1)
+	}
 
 	switch args[0] {
 	case "run":
-		httpOK := runHTTP(url)
-		mcpOK := runMCP(url)
+		httpOK := runHTTP(url, email)
+		mcpOK := runMCP(url, email)
 		fmt.Println()
 		if httpOK && mcpOK {
 			fmt.Println("All flows passed.")
@@ -518,17 +552,17 @@ func main() {
 		}
 
 	case "http":
-		if !runHTTP(url) {
+		if !runHTTP(url, email) {
 			os.Exit(1)
 		}
 
 	case "mcp":
-		if !runMCP(url) {
+		if !runMCP(url, email) {
 			os.Exit(1)
 		}
 
 	case "tools":
-		c := newMCPClient(url)
+		c := newMCPClient(url, email)
 		if err := c.initialize(); err != nil {
 			fmt.Fprintf(os.Stderr, "initialize failed: %v\n", err)
 			os.Exit(1)
@@ -546,7 +580,7 @@ func main() {
 		if len(args) < 2 {
 			usage()
 		}
-		c := newMCPClient(url)
+		c := newMCPClient(url, email)
 		if err := c.initialize(); err != nil {
 			fmt.Fprintf(os.Stderr, "initialize failed: %v\n", err)
 			os.Exit(1)

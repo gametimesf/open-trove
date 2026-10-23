@@ -1,0 +1,58 @@
+# Changelog
+
+## [1.4.0](https://github.com/gametimesf/open-trove/compare/open-trove-v1.3.0...open-trove-v1.4.0) (2026-09-14)
+
+
+### Features
+
+* support operator-owned image builds ([#21](https://github.com/gametimesf/open-trove/issues/21)) ([e4f6276](https://github.com/gametimesf/open-trove/commit/e4f6276ce5af66ad9b0a7b45384634421b1f9f46))
+
+## [1.3.0](https://github.com/gametimesf/open-trove/compare/open-trove-v1.2.0...open-trove-v1.3.0) (2026-09-14)
+
+
+### Features
+
+* extend the embedded agent guide with local instructions ([#19](https://github.com/gametimesf/open-trove/issues/19)) ([506b638](https://github.com/gametimesf/open-trove/commit/506b638bd8497e0d73928dd00bd77737587b47d0))
+
+## [1.2.0](https://github.com/gametimesf/open-trove/compare/open-trove-v1.1.1...open-trove-v1.2.0) (2026-09-10)
+
+
+### Features
+
+* support deployment-owned llms.txt overrides ([#17](https://github.com/gametimesf/open-trove/issues/17)) ([5b01bfd](https://github.com/gametimesf/open-trove/commit/5b01bfd5d286f67f58ef3f9d2d8f04b7eb4de489))
+
+## [1.1.1](https://github.com/gametimesf/open-trove/compare/open-trove-v1.1.0...open-trove-v1.1.1) (2026-09-09)
+
+
+### Bug Fixes
+
+* capture complete My Trove activity and uploader attribution ([7997d95](https://github.com/gametimesf/open-trove/commit/7997d954f2c731506fc142812e15ee6d01257a92))
+
+## [1.1.0](https://github.com/gametimesf/open-trove/compare/open-trove-v1.0.2...open-trove-v1.1.0) (2026-08-10)
+
+
+### Features
+
+* submit comments with command enter ([#10](https://github.com/gametimesf/open-trove/issues/10)) ([5862f4c](https://github.com/gametimesf/open-trove/commit/5862f4c15e195fe0d4f2c1f58acda74cf2317175))
+
+## [1.0.2](https://github.com/gametimesf/open-trove/compare/open-trove-v1.0.1...open-trove-v1.0.2) (2026-07-31)
+
+
+### Bug Fixes
+
+* sort recent views by access time ([#8](https://github.com/gametimesf/open-trove/issues/8)) ([d94fc90](https://github.com/gametimesf/open-trove/commit/d94fc90feab29a06fb836031ea02989b25b84268))
+
+## [1.0.1](https://github.com/gametimesf/open-trove/compare/open-trove-v1.0.0...open-trove-v1.0.1) (2026-07-30)
+
+
+### Bug Fixes
+
+* pin GitHub Actions dependencies ([#3](https://github.com/gametimesf/open-trove/issues/3)) ([1a76b5b](https://github.com/gametimesf/open-trove/commit/1a76b5b9b604420dae1a8953f13a524b03e45150))
+
+## 1.0.0 (2026-07-30)
+
+
+### Features
+
+* make open-trove the portable application upstream ([cd3d0dd](https://github.com/gametimesf/open-trove/commit/cd3d0ddbc0ef340f6943eacf44f3be09e346160c))
+* trove — file sharing service with MCP support ([adae0e2](https://github.com/gametimesf/open-trove/commit/adae0e2f25366f9bb0ec4541a09f638bc4a9233c))

@@ -1,126 +1,285 @@
 # Trove
 
-File sharing service. Upload any file, get a shareable link.
+Self-hosted file sharing for humans and agents. Upload a file, receive a short
+URL, and review it in the browser.
 
-HTML renders in the browser, images display inline, code gets syntax highlighting, markdown renders beautifully, and everything else gets a download button. Upload ZIP files to host multi-page websites.
+Trove renders HTML, Markdown, code, CSV, images, video, and DOCX files; hosts
+multi-page sites from ZIP archives; exposes HTTP, OpenAPI, and MCP interfaces;
+and keeps persistent comment threads anchored to files, text, and HTML
+elements.
 
-Trove exposes an [MCP](https://modelcontextprotocol.io/) endpoint so AI tools can discover and use its API programmatically.
-
-## Quick Start
+## Quick start
 
 ```bash
 docker compose up
 ```
 
-Open http://localhost:8080 — upload a file and get a link.
+Open <http://localhost:8080>. MinIO stores data in a Docker volume, so uploads
+survive container restarts.
 
 ## Features
 
-- Drag-and-drop or paste any file to upload
-- Custom slugs (`/my-report`) or auto-generated short URLs
-- HTML, markdown, code, CSV, images, video — all render in-browser
-- Multi-page website hosting via ZIP upload
-- `/mine` dashboard tracks your uploads and views
-- MCP endpoint at `/mcp` for AI tool integration
-- `/.well-known/agent.json` and `/llms.txt` for agent discovery
-- Range request support for streaming large files
-- OpenAPI spec at `/swagger/` and `/openapi.json`
+- Drag-and-drop, paste, HTTP, and agent uploads
+- Custom or generated slugs, overwrite support, and range downloads
+- Multi-page site hosting from ZIP files
+- Browser and API audit attribution through `X-Trove-User-Email`
+- Whole-file comments on every artifact type
+- Element and text comments on rendered HTML, including existing artifacts
+- Threaded replies, edit/delete, collapse, resolve/reopen, and resolved history
+- Optional LLM-backed upload intake with bounded, observable failure behavior
+- S3 and S3-compatible storage, including MinIO
+- MCP at `/mcp`, OpenAPI at `/openapi.json`, and agent guidance at `/llms.txt`
+
+## Identity and access
+
+My Trove history is scoped to the browser's `trove_id` cookie, not the entered
+email. Recently Viewed includes your own files and sites, ordered by last view;
+background assets and raw downloads do not create visits. Rows show uploader
+attribution when available, or "unknown" for older artifacts without it. Activity
+writes use bounded conditional S3 updates; loading failures are shown as errors
+rather than an empty history. No identity linking or history backfill is performed.
+
+Trove's built-in identity is intentionally **attribution, not authentication**.
+The browser asks for an email once, stores it locally, and sends
+`X-Trove-User-Email`. API and agent clients must send the same header on every
+request. It is required for `POST`, `PUT`, `PATCH`, and `DELETE`.
+
+The server validates the address format but does not verify ownership. Put
+Trove behind your own authentication and authorization layer when access
+control matters.
+
+```bash
+export TROVE_BASE_URL=http://localhost:8080
+export TROVE_USER_EMAIL=you@example.com
+
+curl -X POST "$TROVE_BASE_URL/upload" \
+  -H "X-Trove-User-Email: $TROVE_USER_EMAIL" \
+  -F file=@report.html \
+  -F slug=my-report
+```
+
+## Comments
+
+Every viewer has a Comments mode. Opening the drawer resizes the artifact
+instead of covering it. Users can comment on the whole file, select a rendered
+element, or highlight text. Threads support replies, editing, deletion,
+collapse, resolution, reopening, and resolved-history filtering.
+
+No special markup is required. For durable anchors across regenerated HTML,
+add unique, stable component identifiers:
+
+```html
+<section
+  data-trove-id="revenue-chart"
+  data-trove-label="Quarterly revenue chart">
+  ...
+</section>
+```
+
+Use `data-trove-comment-ignore` for transient controls that should not be
+selectable. See [`docs/llms.txt`](docs/llms.txt) for the complete authoring and
+comments API contract.
 
 ## Configuration
 
-Trove loads config from `trove.yaml` in the working directory:
+Resolution order, from lowest to highest precedence:
+
+1. Built-in defaults
+2. `trove-$ENVIRONMENT.yaml`, when present
+3. `trove.yaml`, as the fallback file
+4. The explicit file named by `TROVE_CONFIG`
+5. Inline YAML in `TROVE_CONFIG_YAML`
+6. `TROVE_PORT` and `TROVE_BASE_URL`
+
+Unknown YAML fields and invalid URLs fail startup instead of silently falling
+back.
 
 ```yaml
 port: "8080"
-base_url: "https://your-domain.com"
+base_url: "https://trove.example.com"
 
 store:
   type: s3
   s3:
-    bucket: "your-bucket"
-    endpoint: ""         # leave empty for real AWS S3
+    bucket: "trove-uploads"
+    endpoint: "" # empty for AWS S3
     region: "us-west-2"
+
+uploads:
+  max_bytes: 209715200
+  max_site_files: 2000
+  max_site_bytes: 209715200
+  max_site_file_bytes: 104857600
+
+# Optional: publish selected slugs through another route.
+share_url_rules:
+  - slug_prefix: "partner-"
+    base_url: "https://proxy.example.com"
+    path_prefix: "/shared/trove"
+
+content_review:
+  contact_name: "the security team"
+  contact_email: "security@example.com"
+
+intake:
+  enabled: false
+  provider: "anthropic"
+  model: "claude-sonnet-4-6"
+  fail_mode: "closed"
+  max_check_bytes: 204800
+  timeout_ms: 15000
 ```
 
-For local development, the default `trove.yaml` points to minio (started by docker compose).
+When Anthropic intake is enabled, provide `ANTHROPIC_API_KEY` through your
+secret manager. Guidance can come from `prompt_inline`, `prompt_path`, or the
+S3 `prompt_source_bucket` and `prompt_source_key` fields. Do not commit secrets
+or private review guidance.
 
-For deployments, set the `ENVIRONMENT` env var and create a `trove-{environment}.yaml` file — e.g. `trove-production.yaml`. The app loads the environment-specific file if it exists, otherwise falls back to `trove.yaml`.
+For orchestrators that cannot mount files, pass the deployment YAML through
+`TROVE_CONFIG_YAML`.
 
-## Self-Hosting
+## Self-hosting
 
-### Docker Compose (recommended)
+### Build your deployment image
+
+OpenTrove publishes source releases, not hosted container images. Forkers and
+operators build with this repository's Dockerfile and publish to their own
+registry. Pin a source release/commit, build once, and promote the tested image
+by immutable digest between environments.
 
 ```bash
-docker compose up -d
+docker build -t your-registry/trove:your-release .
 ```
 
-This starts trove + minio (S3-compatible storage). Files are stored in a minio volume and persist across restarts.
-
-### Docker with real S3
+To incorporate local authoring guidance at build time, put the file inside the
+build context and outside paths excluded by `.dockerignore`:
 
 ```bash
-docker build -t trove .
-
-docker run -p 8080:8080 \
-  -e AWS_ACCESS_KEY_ID=... \
-  -e AWS_SECRET_ACCESS_KEY=... \
-  -v /path/to/trove-production.yaml:/app/trove-production.yaml \
-  -e ENVIRONMENT=production \
-  trove
+docker build --build-arg LLMS_TXT_APPEND=custom/llms.txt \
+  -t your-registry/trove:your-release .
 ```
 
-### Binary
+The build embeds the complete default guide + two newline characters + the exact
+appendix. To deliberately replace the entire guide instead, use
+`LLMS_TXT_OVERRIDE=custom/llms.txt`. The modes are mutually exclusive. Without
+either argument, the default guide is unchanged. Paths are build-context files,
+not URLs. Missing files, blank/non-UTF-8 text, and customization over 65,536 bytes
+fail the build. Keep custom files non-secret: the guide is served to readers and
+included in the image. Editing the source file requires a rebuild and deploy,
+not infrastructure configuration changes.
+
+Do not also configure runtime `llms_txt_append` when the appendix is already
+baked in, or it will be appended twice. Runtime override remains an explicit
+replacement of the entire built guide. Configuration and secrets should still
+be supplied at deployment, not copied into the build context.
+
+For a local binary without Docker:
 
 ```bash
 go build -o trove ./cmd/server
-./trove
 ```
 
-Trove looks for `trove.yaml` in the current directory.
-
-## API
+## API and MCP
 
 ```bash
-# Upload a file
-curl -X POST http://localhost:8080/upload -F file=@report.html -F slug=my-report
-
 # Upload a multi-page website
 zip -r site.zip my-site/
-curl -X POST http://localhost:8080/upload -F file=@site.zip -F slug=my-site
+curl -X POST "$TROVE_BASE_URL/upload" \
+  -H "X-Trove-User-Email: $TROVE_USER_EMAIL" \
+  -F file=@site.zip \
+  -F slug=my-site
 
-# View
-open http://localhost:8080/my-report
-
-# Raw download
-curl http://localhost:8080/my-report/raw
-
-# Delete (not exposed in MCP or UI)
-curl -X DELETE http://localhost:8080/delete/my-report
+# View or download
+open "$TROVE_BASE_URL/my-site"
+curl "$TROVE_BASE_URL/my-report/raw" \
+  -H "X-Trove-User-Email: $TROVE_USER_EMAIL"
 ```
 
-## MCP
-
-Trove implements the [Model Context Protocol](https://modelcontextprotocol.io/) via Streamable HTTP at `/mcp`. AI tools can discover available operations and call them programmatically.
-
-The `cmd/mcp-client` directory contains a CLI for testing the MCP endpoint:
+The MCP endpoint uses Streamable HTTP at `/mcp`. A test client is included:
 
 ```bash
-go run ./cmd/mcp-client tools                          # list tools
-go run ./cmd/mcp-client call GET_llmstxt               # call a tool
-go run ./cmd/mcp-client call GET_slug_raw slug=my-file  # call with args
-go run ./cmd/mcp-client run                            # full e2e flow
+go run ./cmd/mcp-client -url "$TROVE_BASE_URL" -email "$TROVE_USER_EMAIL" tools
+go run ./cmd/mcp-client -url "$TROVE_BASE_URL" -email "$TROVE_USER_EMAIL" run
 ```
+
+Discovery surfaces:
+
+- `GET /llms.txt`
+- `GET /.well-known/agent.json`
+- `GET /openapi.json`
+- `GET /swagger/`
+
+## Storage compatibility
+
+Trove keeps the established S3 object layout:
+
+- single-file artifacts at `<slug>`
+- site manifests at `_sites/<slug>.json`
+- site files at `<slug>/<path>`
+- browser activity at `_users/<id>.json`
+- comments at `_comments/<slug>/<id>.json`
+
+Upgrading from an existing Trove deployment does not require a data migration.
+
+## Security model
+
+Uploaded HTML is active, user-controlled content. The current same-origin
+viewer enables scripts and same-origin access so element/text comments work.
+This is appropriate for trusted-user deployments behind an access-control
+boundary; it is **not** a safe anonymous Internet upload service.
+
+Read [`SECURITY.md`](SECURITY.md) before exposing a deployment. At minimum,
+require authentication in front of Trove, restrict writers, use a dedicated
+origin, and set conservative upload limits.
 
 ## Development
 
 ```bash
-make run              # docker compose up (hot reload)
-make test             # unit tests
-make lint             # golangci-lint
-make integration-test # e2e tests with minio
-make test-all         # lint + test + integration-test
+make test
+make lint
+make integration-test
+make test-all
 ```
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) and
+[`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## License
 
-MIT
+[MIT](LICENSE)
+
+## Deployment-owned agent documentation
+
+By default, `/llms.txt` serves the full agent/API guide embedded in the release.
+To **extend that guide without copying or losing it**, set `llms_txt_append`:
+
+```yaml
+llms_txt_append: |
+  ## Team authoring guidelines
+  Use our document design conventions and include editable diagram source.
+```
+
+The response is the embedded guide, two newline characters, then the configured
+appendix. Both input documents are preserved byte-for-byte. The default guide
+therefore follows the installed release automatically, and clients get the full
+API instructions and local guidance in one request. No template evaluation,
+remote document store, runtime fetch, or copied upstream reference is involved.
+
+For deployments that intentionally replace the entire guide, the existing
+`llms_txt_override` field still serves its content verbatim. The two modes are
+mutually exclusive: configuring both fails startup instead of silently dropping
+content. When switching modes across configuration layers, explicitly set the
+old field to null. Omitted/null fields select the unchanged embedded default.
+
+Both fields accept non-blank UTF-8 text up to 65,536 bytes (the append limit applies
+to the appendix, not the embedded guide). Invalid configuration fails startup.
+GET/HEAD, `text/plain`, content lengths, and range requests apply to the selected
+whole document. Content is captured once at startup; changes require redeployment.
+For configured content, logs report source, response byte count and SHA-256,
+never the document body.
+
+For repo-local authoring guidance, prefer the Dockerfile's build-time arguments
+above. Runtime customization remains supported for deployments that explicitly
+choose to manage the guide as configuration. Remove runtime append/override
+settings when migrating that content into the build; otherwise they still apply
+to the built guide. No remote document store or runtime fetch is involved.

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/zip"
 	"bytes"
 	"encoding/json"
 	"image/png"
@@ -11,20 +12,71 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gametimesf/open-trove/comments"
+	trovedocs "github.com/gametimesf/open-trove/docs"
+	"github.com/gametimesf/open-trove/intake"
 	"github.com/gametimesf/open-trove/internal/favicon"
 	"github.com/gametimesf/open-trove/storage"
 	"github.com/gametimesf/open-trove/storage/fake"
 	"github.com/labstack/echo/v4"
 )
 
+const testUserEmail = "test.user@example.com"
+
 func newTestServer() (*server, *fake.Store) {
 	store := fake.NewStore()
 	srv := &server{
-		store:   store,
-		baseURL: "http://localhost:8080",
-		intn:    func(int) int { return 0 },
+		store:      store,
+		comments:   comments.NewService(store),
+		baseURL:    "http://localhost:8080",
+		intake:     intake.NoOp{},
+		intakeFail: intake.FailClosed,
+		intn:       func(int) int { return 0 },
 	}
 	return srv, store
+}
+
+func TestRawURLFor(t *testing.T) {
+	tests := []struct {
+		name  string
+		rules []shareURLRule
+		slug  string
+		want  string
+	}{
+		{"unmatched slug stays host-relative", []shareURLRule{{slugPrefix: "partner-", baseURL: "https://proxy.example.com", pathPrefix: "/shared/trove"}}, "abc123", "/abc123/raw"},
+		{"matching slug uses alternate URL", []shareURLRule{{slugPrefix: "partner-", baseURL: "https://proxy.example.com", pathPrefix: "/shared/trove"}}, "partner-report", "https://proxy.example.com/shared/trove/partner-report/raw"},
+		{"no rules stays relative", nil, "partner-report", "/partner-report/raw"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &server{shareURLRules: tt.rules}
+			if got := s.rawURLFor(tt.slug); got != tt.want {
+				t.Errorf("rawURLFor(%q) = %q, want %q", tt.slug, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestViewURLFor(t *testing.T) {
+	tests := []struct {
+		name    string
+		baseURL string
+		rules   []shareURLRule
+		slug    string
+		want    string
+	}{
+		{"unmatched slug uses default base URL", "http://localhost:8080", []shareURLRule{{slugPrefix: "partner-", baseURL: "https://proxy.example.com", pathPrefix: "/shared/trove"}}, "abc123", "http://localhost:8080/abc123"},
+		{"matching slug uses alternate URL", "http://localhost:8080", []shareURLRule{{slugPrefix: "partner-", baseURL: "https://proxy.example.com", pathPrefix: "/shared/trove"}}, "partner-report", "https://proxy.example.com/shared/trove/partner-report"},
+		{"no rules uses default base URL", "http://localhost:8080", nil, "partner-report", "http://localhost:8080/partner-report"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &server{baseURL: tt.baseURL, shareURLRules: tt.rules}
+			if got := s.viewURLFor(tt.slug); got != tt.want {
+				t.Errorf("viewURLFor(%q) = %q, want %q", tt.slug, got, tt.want)
+			}
+		})
+	}
 }
 
 func newTestEcho(srv *server) *echo.Echo {
@@ -60,7 +112,27 @@ func createMultipartRequestWithOverwrite(t *testing.T, filename string, content 
 
 	req := httptest.NewRequest("POST", "/upload", &buf)
 	req.Header.Set("Content-Type", w.FormDataContentType())
+	req.Header.Set(troveUserEmailHeader, testUserEmail)
 	return req
+}
+
+func createZIP(t *testing.T, files map[string][]byte) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for name, content := range files {
+		entry, err := zw.Create(name)
+		if err != nil {
+			t.Fatalf("creating ZIP entry %q: %v", name, err)
+		}
+		if _, err := entry.Write(content); err != nil {
+			t.Fatalf("writing ZIP entry %q: %v", name, err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("closing ZIP: %v", err)
+	}
+	return buf.Bytes()
 }
 
 func TestHandleIndex(t *testing.T) {
@@ -210,6 +282,32 @@ func TestHandleUploadWithCustomSlug(t *testing.T) {
 	}
 }
 
+func TestHandleUploadMatchingRuleReturnsAlternateURL(t *testing.T) {
+	srv, _ := newTestServer()
+	srv.shareURLRules = []shareURLRule{{
+		slugPrefix: "partner-",
+		baseURL:    "https://proxy.example.com",
+		pathPrefix: "/shared/trove",
+	}}
+	e := newTestEcho(srv)
+
+	req := createMultipartRequest(t, "report.html", []byte("<html>hi</html>"), "partner-report")
+	w := httptest.NewRecorder()
+	e.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Errorf("expected 200, got %d; body: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]string
+	json.Unmarshal(w.Body.Bytes(), &resp)
+
+	want := "https://proxy.example.com/shared/trove/partner-report"
+	if resp["url"] != want {
+		t.Errorf("expected url %q, got %q", want, resp["url"])
+	}
+}
+
 func TestHandleUploadInvalidSlug(t *testing.T) {
 	srv, _ := newTestServer()
 	e := newTestEcho(srv)
@@ -223,12 +321,121 @@ func TestHandleUploadInvalidSlug(t *testing.T) {
 	}
 }
 
+func TestHandleUploadRejectsFileOverLimit(t *testing.T) {
+	srv, _ := newTestServer()
+	srv.uploads = uploadLimits{
+		maxBytes:         3,
+		maxSiteFiles:     10,
+		maxSiteBytes:     100,
+		maxSiteFileBytes: 100,
+	}
+	e := newTestEcho(srv)
+
+	req := createMultipartRequest(t, "file.txt", []byte("four"), "too-large")
+	w := httptest.NewRecorder()
+	e.ServeHTTP(w, req)
+
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleSiteUploadRejectsUnsafePath(t *testing.T) {
+	srv, _ := newTestServer()
+	e := newTestEcho(srv)
+	archive := createZIP(t, map[string][]byte{
+		"index.html": []byte("<h1>site</h1>"),
+		"../oops.js": []byte("alert(1)"),
+	})
+
+	req := createMultipartRequest(t, "site.zip", archive, "unsafe-site")
+	w := httptest.NewRecorder()
+	e.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleSiteUploadRejectsExpansionLimits(t *testing.T) {
+	tests := []struct {
+		name   string
+		limits uploadLimits
+		files  map[string][]byte
+	}{
+		{
+			name:   "too many files",
+			limits: uploadLimits{maxBytes: 1 << 20, maxSiteFiles: 1, maxSiteBytes: 1 << 20, maxSiteFileBytes: 1 << 20},
+			files: map[string][]byte{
+				"index.html": []byte("<h1>site</h1>"),
+				"app.js":     []byte("ok"),
+			},
+		},
+		{
+			name:   "single entry too large",
+			limits: uploadLimits{maxBytes: 1 << 20, maxSiteFiles: 10, maxSiteBytes: 1 << 20, maxSiteFileBytes: 8},
+			files: map[string][]byte{
+				"index.html": []byte("<h1>site</h1>"),
+			},
+		},
+		{
+			name:   "expanded archive too large",
+			limits: uploadLimits{maxBytes: 1 << 20, maxSiteFiles: 10, maxSiteBytes: 15, maxSiteFileBytes: 15},
+			files: map[string][]byte{
+				"index.html": []byte("<h1>x</h1>"),
+				"app.js":     []byte("123456"),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv, _ := newTestServer()
+			srv.uploads = tt.limits
+			e := newTestEcho(srv)
+			req := createMultipartRequest(t, "site.zip", createZIP(t, tt.files), "limited-site")
+			w := httptest.NewRecorder()
+			e.ServeHTTP(w, req)
+			if w.Code != http.StatusRequestEntityTooLarge {
+				t.Fatalf("expected 413, got %d: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestSafeSitePath(t *testing.T) {
+	tests := []struct {
+		name, path, prefix, want string
+		wantErr                  bool
+	}{
+		{name: "plain", path: "assets/app.js", want: "assets/app.js"},
+		{name: "strip top directory", path: "site/index.html", prefix: "site/", want: "index.html"},
+		{name: "parent traversal", path: "../secret", wantErr: true},
+		{name: "absolute", path: "/etc/passwd", wantErr: true},
+		{name: "windows separator", path: `assets\app.js`, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := safeSitePath(tt.path, tt.prefix)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got %q", got)
+				}
+				return
+			}
+			if err != nil || got != tt.want {
+				t.Fatalf("safeSitePath() = %q, %v; want %q", got, err, tt.want)
+			}
+		})
+	}
+}
+
 func TestHandleUploadSlugConflict(t *testing.T) {
 	srv, store := newTestServer()
 	e := newTestEcho(srv)
 
 	// Pre-populate the store
-	store.Put(nil, "taken", bytes.NewReader([]byte("x")), "text/plain", "x.txt", false, false)
+	store.Put(nil, "taken", bytes.NewReader([]byte("x")), storage.PutOptions{ContentType: "text/plain", Filename: "x.txt", CustomSlug: false, Overwrite: false})
 
 	req := createMultipartRequest(t, "file.txt", []byte("data"), "taken")
 	w := httptest.NewRecorder()
@@ -244,7 +451,7 @@ func TestHandleUploadOverwrite(t *testing.T) {
 	e := newTestEcho(srv)
 
 	// Pre-populate the store
-	store.Put(nil, "my-doc", bytes.NewReader([]byte("v1")), "text/plain", "old.txt", true, false)
+	store.Put(nil, "my-doc", bytes.NewReader([]byte("v1")), storage.PutOptions{ContentType: "text/plain", Filename: "old.txt", CustomSlug: true, Overwrite: false})
 
 	req := createMultipartRequestWithOverwrite(t, "new.txt", []byte("v2"), "my-doc", true)
 	w := httptest.NewRecorder()
@@ -275,6 +482,7 @@ func TestHandleUploadNoFile(t *testing.T) {
 
 	req := httptest.NewRequest("POST", "/upload", strings.NewReader(""))
 	req.Header.Set("Content-Type", "multipart/form-data; boundary=xxx")
+	req.Header.Set(troveUserEmailHeader, testUserEmail)
 	w := httptest.NewRecorder()
 	e.ServeHTTP(w, req)
 
@@ -287,7 +495,7 @@ func TestHandleViewHTML(t *testing.T) {
 	srv, store := newTestServer()
 	e := newTestEcho(srv)
 
-	store.Put(nil, "page", bytes.NewReader([]byte("<html>hi</html>")), "text/html; charset=utf-8", "index.html", false, false)
+	store.Put(nil, "page", bytes.NewReader([]byte("<html>hi</html>")), storage.PutOptions{ContentType: "text/html; charset=utf-8", Filename: "index.html", CustomSlug: false, Overwrite: false})
 
 	req := httptest.NewRequest("GET", "/page", nil)
 	w := httptest.NewRecorder()
@@ -309,7 +517,7 @@ func TestHandleViewImage(t *testing.T) {
 	srv, store := newTestServer()
 	e := newTestEcho(srv)
 
-	store.Put(nil, "pic", bytes.NewReader([]byte("PNG...")), "image/png", "photo.png", false, false)
+	store.Put(nil, "pic", bytes.NewReader([]byte("PNG...")), storage.PutOptions{ContentType: "image/png", Filename: "photo.png", CustomSlug: false, Overwrite: false})
 
 	req := httptest.NewRequest("GET", "/pic", nil)
 	w := httptest.NewRecorder()
@@ -328,7 +536,7 @@ func TestHandleViewOther(t *testing.T) {
 	srv, store := newTestServer()
 	e := newTestEcho(srv)
 
-	store.Put(nil, "doc", bytes.NewReader([]byte("%PDF...")), "application/pdf", "report.pdf", false, false)
+	store.Put(nil, "doc", bytes.NewReader([]byte("%PDF...")), storage.PutOptions{ContentType: "application/pdf", Filename: "report.pdf", CustomSlug: false, Overwrite: false})
 
 	req := httptest.NewRequest("GET", "/doc", nil)
 	w := httptest.NewRecorder()
@@ -361,7 +569,7 @@ func TestHandleRaw(t *testing.T) {
 	e := newTestEcho(srv)
 
 	content := []byte("<html><body>Hello</body></html>")
-	store.Put(nil, "raw1", bytes.NewReader(content), "text/html; charset=utf-8", "page.html", false, false)
+	store.Put(nil, "raw1", bytes.NewReader(content), storage.PutOptions{ContentType: "text/html; charset=utf-8", Filename: "page.html", CustomSlug: false, Overwrite: false})
 
 	req := httptest.NewRequest("GET", "/raw1/raw", nil)
 	w := httptest.NewRecorder()
@@ -541,6 +749,9 @@ func TestUploadRecordsActivity(t *testing.T) {
 	if m.Uploads[0].Slug != "my-report" {
 		t.Errorf("expected slug 'my-report', got %q", m.Uploads[0].Slug)
 	}
+	if m.Uploads[0].UserEmail != testUserEmail {
+		t.Errorf("expected upload email %q, got %q", testUserEmail, m.Uploads[0].UserEmail)
+	}
 }
 
 func TestViewRecordsActivity(t *testing.T) {
@@ -550,12 +761,13 @@ func TestViewRecordsActivity(t *testing.T) {
 	userB := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
 	// Upload a file as user A
-	store.Put(nil, "shared-doc", bytes.NewReader([]byte("hi")), "text/plain", "doc.txt", false, false)
+	store.Put(nil, "shared-doc", bytes.NewReader([]byte("hi")), storage.PutOptions{ContentType: "text/plain", Filename: "doc.txt", CustomSlug: false, Overwrite: false})
 	store.RecordUpload(nil, "user-a", storage.ActivityRecord{Slug: "shared-doc", Filename: "doc.txt", ContentType: "text/plain"})
 
 	// View as user B
 	req := httptest.NewRequest("GET", "/shared-doc", nil)
 	req.AddCookie(&http.Cookie{Name: "trove_id", Value: userB})
+	req.Header.Set(troveUserEmailHeader, testUserEmail)
 	w := httptest.NewRecorder()
 	e.ServeHTTP(w, req)
 
@@ -570,15 +782,18 @@ func TestViewRecordsActivity(t *testing.T) {
 	if m.Views[0].Slug != "shared-doc" {
 		t.Errorf("expected view slug 'shared-doc', got %q", m.Views[0].Slug)
 	}
+	if m.Views[0].UserEmail != testUserEmail {
+		t.Errorf("expected view email %q, got %q", testUserEmail, m.Views[0].UserEmail)
+	}
 }
 
-func TestViewOwnUploadNotRecorded(t *testing.T) {
+func TestViewOwnUploadRecorded(t *testing.T) {
 	srv, store := newTestServer()
 	e := newTestEcho(srv)
 
-	uid := "uploader-1"
+	uid := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 	// Upload a file and record it in manifest
-	store.Put(nil, "my-file", bytes.NewReader([]byte("hi")), "text/plain", "file.txt", true, false)
+	store.Put(nil, "my-file", bytes.NewReader([]byte("hi")), storage.PutOptions{ContentType: "text/plain", Filename: "file.txt", CustomSlug: true, Overwrite: false})
 	store.RecordUpload(nil, uid, storage.ActivityRecord{Slug: "my-file", Filename: "file.txt", ContentType: "text/plain"})
 
 	// View own file
@@ -592,8 +807,8 @@ func TestViewOwnUploadNotRecorded(t *testing.T) {
 	}
 
 	m, _ := store.GetManifest(nil, uid)
-	if len(m.Views) != 0 {
-		t.Errorf("expected 0 views (own upload), got %d", len(m.Views))
+	if len(m.Views) != 1 {
+		t.Errorf("expected 1 view (own upload), got %d", len(m.Views))
 	}
 }
 
@@ -601,7 +816,7 @@ func TestViewDeduplication(t *testing.T) {
 	srv, store := newTestServer()
 	e := newTestEcho(srv)
 
-	store.Put(nil, "the-doc", bytes.NewReader([]byte("hi")), "text/plain", "doc.txt", false, false)
+	store.Put(nil, "the-doc", bytes.NewReader([]byte("hi")), storage.PutOptions{ContentType: "text/plain", Filename: "doc.txt", CustomSlug: false, Overwrite: false})
 
 	uid := "11111111-1111-1111-1111-111111111111"
 
@@ -623,7 +838,7 @@ func TestHandleRawDownloadFilename(t *testing.T) {
 	srv, store := newTestServer()
 	e := newTestEcho(srv)
 
-	store.Put(nil, "my-report", bytes.NewReader([]byte("<html>hi</html>")), "text/html; charset=utf-8", "report.html", true, false)
+	store.Put(nil, "my-report", bytes.NewReader([]byte("<html>hi</html>")), storage.PutOptions{ContentType: "text/html; charset=utf-8", Filename: "report.html", CustomSlug: true, Overwrite: false})
 
 	req := httptest.NewRequest("GET", "/my-report/raw", nil)
 	w := httptest.NewRecorder()
@@ -667,11 +882,37 @@ func TestHandleMineWithData(t *testing.T) {
 	}
 }
 
+func TestHandleMineSortsViewsByMostRecentlyViewed(t *testing.T) {
+	manifest := &storage.UserManifest{
+		Views: []storage.ActivityRecord{
+			{Slug: "most-recent", Filename: "most-recent.txt", ContentType: "text/plain", At: "2026-07-31T18:03:00Z"},
+			{Slug: "oldest", Filename: "oldest.txt", ContentType: "text/plain", At: "2026-07-29T18:03:00Z"},
+			{Slug: "middle", Filename: "middle.txt", ContentType: "text/plain", At: "2026-07-30T18:03:00Z"},
+		},
+	}
+
+	var page bytes.Buffer
+	if err := myTroveTemplate.Execute(&page, manifest); err != nil {
+		t.Fatalf("rendering My Trove: %v", err)
+	}
+
+	body := page.String()
+	mostRecent := strings.Index(body, `href="/most-recent"`)
+	middle := strings.Index(body, `href="/middle"`)
+	oldest := strings.Index(body, `href="/oldest"`)
+	if mostRecent == -1 || middle == -1 || oldest == -1 {
+		t.Fatalf("expected every view in page, got indexes: most recent=%d middle=%d oldest=%d", mostRecent, middle, oldest)
+	}
+	if !(mostRecent < middle && middle < oldest) {
+		t.Errorf("expected views in descending view time, got indexes: most recent=%d middle=%d oldest=%d", mostRecent, middle, oldest)
+	}
+}
+
 func TestHandleViewVideo(t *testing.T) {
 	srv, store := newTestServer()
 	e := newTestEcho(srv)
 
-	store.Put(nil, "clip", bytes.NewReader([]byte{0x00, 0x00}), "video/mp4", "video.mp4", false, false)
+	store.Put(nil, "clip", bytes.NewReader([]byte{0x00, 0x00}), storage.PutOptions{ContentType: "video/mp4", Filename: "video.mp4", CustomSlug: false, Overwrite: false})
 
 	req := httptest.NewRequest("GET", "/clip", nil)
 	w := httptest.NewRecorder()
@@ -805,7 +1046,7 @@ func TestHandleViewCode(t *testing.T) {
 	srv, store := newTestServer()
 	e := newTestEcho(srv)
 
-	store.Put(nil, "code1", bytes.NewReader([]byte("package main\n")), "text/plain; charset=utf-8", "main.go", false, false)
+	store.Put(nil, "code1", bytes.NewReader([]byte("package main\n")), storage.PutOptions{ContentType: "text/plain; charset=utf-8", Filename: "main.go", CustomSlug: false, Overwrite: false})
 
 	req := httptest.NewRequest("GET", "/code1", nil)
 	w := httptest.NewRecorder()
@@ -833,7 +1074,7 @@ func TestHandleViewCodePython(t *testing.T) {
 	srv, store := newTestServer()
 	e := newTestEcho(srv)
 
-	store.Put(nil, "pyfile", bytes.NewReader([]byte("print('hello')\n")), "text/plain; charset=utf-8", "script.py", false, false)
+	store.Put(nil, "pyfile", bytes.NewReader([]byte("print('hello')\n")), storage.PutOptions{ContentType: "text/plain; charset=utf-8", Filename: "script.py", CustomSlug: false, Overwrite: false})
 
 	req := httptest.NewRequest("GET", "/pyfile", nil)
 	w := httptest.NewRecorder()
@@ -849,7 +1090,7 @@ func TestHandleViewCSV(t *testing.T) {
 	srv, store := newTestServer()
 	e := newTestEcho(srv)
 
-	store.Put(nil, "csvfile", bytes.NewReader([]byte("a,b,c\n1,2,3\n")), "text/csv; charset=utf-8", "data.csv", false, false)
+	store.Put(nil, "csvfile", bytes.NewReader([]byte("a,b,c\n1,2,3\n")), storage.PutOptions{ContentType: "text/csv; charset=utf-8", Filename: "data.csv", CustomSlug: false, Overwrite: false})
 
 	req := httptest.NewRequest("GET", "/csvfile", nil)
 	w := httptest.NewRecorder()
@@ -880,7 +1121,7 @@ func TestHandleViewHTMLNotCode(t *testing.T) {
 	srv, store := newTestServer()
 	e := newTestEcho(srv)
 
-	store.Put(nil, "htmlpage", bytes.NewReader([]byte("<html><body>Hello</body></html>")), "text/html; charset=utf-8", "index.html", false, false)
+	store.Put(nil, "htmlpage", bytes.NewReader([]byte("<html><body>Hello</body></html>")), storage.PutOptions{ContentType: "text/html; charset=utf-8", Filename: "index.html", CustomSlug: false, Overwrite: false})
 
 	req := httptest.NewRequest("GET", "/htmlpage", nil)
 	w := httptest.NewRecorder()
@@ -905,7 +1146,7 @@ func TestHandleViewOGTags(t *testing.T) {
 	srv, store := newTestServer()
 	e := newTestEcho(srv)
 
-	store.Put(nil, "og-test", bytes.NewReader([]byte("hello")), "text/plain; charset=utf-8", "hello.txt", false, false)
+	store.Put(nil, "og-test", bytes.NewReader([]byte("hello")), storage.PutOptions{ContentType: "text/plain; charset=utf-8", Filename: "hello.txt", CustomSlug: false, Overwrite: false})
 
 	req := httptest.NewRequest("GET", "/og-test", nil)
 	w := httptest.NewRecorder()
@@ -939,7 +1180,7 @@ func TestHandleViewOGTagsOnImage(t *testing.T) {
 	srv, store := newTestServer()
 	e := newTestEcho(srv)
 
-	store.Put(nil, "ogimg", bytes.NewReader([]byte("PNG...")), "image/png", "photo.png", false, false)
+	store.Put(nil, "ogimg", bytes.NewReader([]byte("PNG...")), storage.PutOptions{ContentType: "image/png", Filename: "photo.png", CustomSlug: false, Overwrite: false})
 
 	req := httptest.NewRequest("GET", "/ogimg", nil)
 	w := httptest.NewRecorder()
@@ -958,7 +1199,7 @@ func TestHandleViewImageStillWorks(t *testing.T) {
 	srv, store := newTestServer()
 	e := newTestEcho(srv)
 
-	store.Put(nil, "img1", bytes.NewReader([]byte("PNG...")), "image/png", "photo.png", false, false)
+	store.Put(nil, "img1", bytes.NewReader([]byte("PNG...")), storage.PutOptions{ContentType: "image/png", Filename: "photo.png", CustomSlug: false, Overwrite: false})
 
 	req := httptest.NewRequest("GET", "/img1", nil)
 	w := httptest.NewRecorder()
@@ -980,7 +1221,7 @@ func TestHandleViewDownloadFallback(t *testing.T) {
 	srv, store := newTestServer()
 	e := newTestEcho(srv)
 
-	store.Put(nil, "binfile", bytes.NewReader([]byte{0x00, 0x01}), "application/octet-stream", "data.bin", false, false)
+	store.Put(nil, "binfile", bytes.NewReader([]byte{0x00, 0x01}), storage.PutOptions{ContentType: "application/octet-stream", Filename: "data.bin", CustomSlug: false, Overwrite: false})
 
 	req := httptest.NewRequest("GET", "/binfile", nil)
 	w := httptest.NewRecorder()
@@ -999,7 +1240,7 @@ func TestHandleViewDocx(t *testing.T) {
 	srv, store := newTestServer()
 	e := newTestEcho(srv)
 
-	store.Put(nil, "docfile", bytes.NewReader([]byte("PK\x03\x04...")), "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "report.docx", false, false)
+	store.Put(nil, "docfile", bytes.NewReader([]byte("PK\x03\x04...")), storage.PutOptions{ContentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", Filename: "report.docx", CustomSlug: false, Overwrite: false})
 
 	req := httptest.NewRequest("GET", "/docfile", nil)
 	w := httptest.NewRecorder()
@@ -1034,7 +1275,7 @@ func TestHandleViewDocxNotCode(t *testing.T) {
 	srv, store := newTestServer()
 	e := newTestEcho(srv)
 
-	store.Put(nil, "doc2", bytes.NewReader([]byte("PK...")), "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "notes.docx", false, false)
+	store.Put(nil, "doc2", bytes.NewReader([]byte("PK...")), storage.PutOptions{ContentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", Filename: "notes.docx", CustomSlug: false, Overwrite: false})
 
 	req := httptest.NewRequest("GET", "/doc2", nil)
 	w := httptest.NewRecorder()
@@ -1088,6 +1329,14 @@ func TestHandleAgentJSON(t *testing.T) {
 	if ep["path"] != "/upload" {
 		t.Errorf("expected path /upload, got %v", ep["path"])
 	}
+	parameters, ok := ep["parameters"].([]any)
+	if !ok || len(parameters) == 0 {
+		t.Fatal("expected upload parameters")
+	}
+	identity := parameters[0].(map[string]any)
+	if identity["name"] != troveUserEmailHeader || identity["required"] != true {
+		t.Errorf("expected required %s parameter, got %v", troveUserEmailHeader, identity)
+	}
 }
 
 func TestHandleLLMsTxt(t *testing.T) {
@@ -1105,13 +1354,24 @@ func TestHandleLLMsTxt(t *testing.T) {
 		t.Errorf("expected text/plain, got %q", ct)
 	}
 	body := w.Body.String()
-	for _, want := range []string{"# Trove", "POST /upload", "GET /{slug}", "curl"} {
+	for _, want := range []string{
+		"# Trove",
+		"POST /upload",
+		"GET /{slug}",
+		"curl",
+		"Send X-Trove-User-Email on every API or agent request",
+		"required for POST, PUT, PATCH, and DELETE requests",
+	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected body to contain %q", want)
 		}
 	}
-	if !strings.Contains(body, "http://localhost:8080") {
-		t.Errorf("expected body to contain base URL")
+	fileBody, err := trovedocs.Files.ReadFile("llms.txt")
+	if err != nil {
+		t.Fatalf("read embedded llms.txt: %v", err)
+	}
+	if !bytes.Equal(w.Body.Bytes(), fileBody) {
+		t.Error("expected response to match docs/llms.txt byte for byte")
 	}
 }
 
@@ -1121,7 +1381,7 @@ func TestHandleDelete(t *testing.T) {
 	e.DELETE("/delete/:slug", srv.handleDelete)
 
 	// Seed a file
-	store.Put(t.Context(), "del-me", strings.NewReader("bye"), "text/plain", "bye.txt", true, false)
+	store.Put(t.Context(), "del-me", strings.NewReader("bye"), storage.PutOptions{ContentType: "text/plain", Filename: "bye.txt", CustomSlug: true, Overwrite: false})
 
 	req := httptest.NewRequest("DELETE", "/delete/del-me", nil)
 	w := httptest.NewRecorder()

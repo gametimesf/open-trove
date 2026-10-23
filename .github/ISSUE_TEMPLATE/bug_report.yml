@@ -1,0 +1,35 @@
+name: Bug report
+description: Report a reproducible problem in Trove
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Remove secrets, private URLs, and uploaded data.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or image digest
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Deployment environment
+      description: Browser, storage backend, proxy, and relevant configuration without secrets.

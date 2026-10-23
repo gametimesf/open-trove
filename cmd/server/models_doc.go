@@ -2,7 +2,7 @@ package main
 
 // UploadResponse documents the response from a successful file upload.
 type UploadResponse struct {
-	URL  string `json:"url" example:"http://localhost:8080/my-report"`
+	URL  string `json:"url" example:"https://trove.example.com/my-report"`
 	Slug string `json:"slug" example:"my-report"`
 }
 
@@ -39,6 +39,6 @@ type AgentEndpoint struct {
 type AgentJSON struct {
 	Name        string          `json:"name" example:"trove"`
 	Description string          `json:"description" example:"File sharing service. Upload any file, get a shareable link."`
-	APIBase     string          `json:"api_base" example:"http://localhost:8080"`
+	APIBase     string          `json:"api_base" example:"https://trove.example.com"`
 	Endpoints   []AgentEndpoint `json:"endpoints"`
 }

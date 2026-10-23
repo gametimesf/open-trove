@@ -55,6 +55,527 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/artifacts/{slug}/comments": {
+            "get": {
+                "description": "Lists whole-artifact threads and threads anchored to the requested site page. Open threads are returned by default.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "comments"
+                ],
+                "summary": "List artifact comment threads",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Email used for audit attribution; send on reads when available",
+                        "name": "X-Trove-User-Email",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Artifact slug",
+                        "name": "slug",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Page path within a multi-page site",
+                        "name": "path",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Resolution filter: open, include, or only",
+                        "name": "resolved",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.CommentListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Creates a root comment attributed from X-Trove-User-Email. Supports whole-file, element, and text anchors.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "comments"
+                ],
+                "summary": "Create an artifact comment thread",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Email used for audit attribution",
+                        "name": "X-Trove-User-Email",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Artifact slug",
+                        "name": "slug",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Comment body and anchor",
+                        "name": "comment",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/comments.CreateInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/comments.Comment"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/artifacts/{slug}/comments/{comment_id}": {
+            "delete": {
+                "description": "Deletes a comment body while preserving a root tombstone when replies remain. The attribution email must match the original author.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "comments"
+                ],
+                "summary": "Delete an artifact comment",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Email used for audit attribution and author matching",
+                        "name": "X-Trove-User-Email",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Artifact slug",
+                        "name": "slug",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Comment or reply ID",
+                        "name": "comment_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Page path within a multi-page site",
+                        "name": "path",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "description": "Replaces a comment body. The attribution email must match the original author.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "comments"
+                ],
+                "summary": "Edit an artifact comment",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Email used for audit attribution and author matching",
+                        "name": "X-Trove-User-Email",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Artifact slug",
+                        "name": "slug",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Comment or reply ID",
+                        "name": "comment_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Page path within a multi-page site",
+                        "name": "path",
+                        "in": "query"
+                    },
+                    {
+                        "description": "Replacement body",
+                        "name": "edit",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/comments.EditInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/comments.Comment"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/artifacts/{slug}/comments/{comment_id}/replies": {
+            "post": {
+                "description": "Adds a reply to an open thread.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "comments"
+                ],
+                "summary": "Reply to an artifact comment thread",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Email used for audit attribution",
+                        "name": "X-Trove-User-Email",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Artifact slug",
+                        "name": "slug",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Root comment ID",
+                        "name": "comment_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Page path within a multi-page site",
+                        "name": "path",
+                        "in": "query"
+                    },
+                    {
+                        "description": "Reply body",
+                        "name": "reply",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/comments.ReplyInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/comments.Comment"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/artifacts/{slug}/comments/{comment_id}/resolution": {
+            "patch": {
+                "description": "Updates the resolution state of a root comment thread.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "comments"
+                ],
+                "summary": "Resolve or reopen an artifact comment thread",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Email used for audit attribution",
+                        "name": "X-Trove-User-Email",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Artifact slug",
+                        "name": "slug",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Root comment ID",
+                        "name": "comment_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Page path within a multi-page site",
+                        "name": "path",
+                        "in": "query"
+                    },
+                    {
+                        "description": "Desired resolution state",
+                        "name": "resolution",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/comments.ResolveInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/comments.Comment"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/delete/{slug}": {
+            "delete": {
+                "description": "Deletes a file by slug. This endpoint is intentionally not exposed via MCP or the UI.",
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Delete a file",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Email used for audit attribution",
+                        "name": "X-Trove-User-Email",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "File slug",
+                        "name": "slug",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Deleted"
+                    },
+                    "400": {
+                        "description": "Missing user email",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/healthz": {
             "get": {
                 "description": "Returns service health status",
@@ -129,6 +650,13 @@ const docTemplate = `{
                 ],
                 "summary": "Upload a file",
                 "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Email used for audit attribution",
+                        "name": "X-Trove-User-Email",
+                        "in": "header",
+                        "required": true
+                    },
                     {
                         "type": "file",
                         "description": "File to upload",
@@ -255,6 +783,45 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/{slug}/{path}": {
+            "get": {
+                "description": "Returns a file from an uploaded multi-page site",
+                "tags": [
+                    "files"
+                ],
+                "summary": "Serve a site asset",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Site slug",
+                        "name": "slug",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "File path within the site",
+                        "name": "path",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "File content",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -317,7 +884,7 @@ const docTemplate = `{
             "properties": {
                 "api_base": {
                     "type": "string",
-                    "example": "http://localhost:8080"
+                    "example": "https://trove.example.com"
                 },
                 "description": {
                     "type": "string",
@@ -332,6 +899,26 @@ const docTemplate = `{
                 "name": {
                     "type": "string",
                     "example": "trove"
+                }
+            }
+        },
+        "cmd_server.CommentListResponse": {
+            "type": "object",
+            "properties": {
+                "current_version": {
+                    "type": "string"
+                },
+                "open_thread_count": {
+                    "type": "integer"
+                },
+                "resource": {
+                    "type": "string"
+                },
+                "threads": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/comments.Thread"
+                    }
                 }
             }
         },
@@ -362,7 +949,185 @@ const docTemplate = `{
                 },
                 "url": {
                     "type": "string",
-                    "example": "http://localhost:8080/my-report"
+                    "example": "https://trove.example.com/my-report"
+                }
+            }
+        },
+        "comments.Anchor": {
+            "type": "object",
+            "properties": {
+                "label": {
+                    "type": "string"
+                },
+                "quote": {
+                    "$ref": "#/definitions/comments.TextQuote"
+                },
+                "rect": {
+                    "$ref": "#/definitions/comments.Rect"
+                },
+                "resource": {
+                    "type": "string"
+                },
+                "role": {
+                    "type": "string"
+                },
+                "selector": {
+                    "type": "string"
+                },
+                "stable_id": {
+                    "type": "string"
+                },
+                "tag": {
+                    "type": "string"
+                },
+                "type": {
+                    "$ref": "#/definitions/comments.AnchorType"
+                },
+                "visible_text": {
+                    "type": "string"
+                }
+            }
+        },
+        "comments.AnchorType": {
+            "type": "string",
+            "enum": [
+                "file",
+                "element",
+                "text"
+            ],
+            "x-enum-varnames": [
+                "AnchorFile",
+                "AnchorElement",
+                "AnchorText"
+            ]
+        },
+        "comments.Comment": {
+            "type": "object",
+            "properties": {
+                "anchor": {
+                    "$ref": "#/definitions/comments.Anchor"
+                },
+                "artifact_version": {
+                    "type": "string"
+                },
+                "author_email": {
+                    "type": "string"
+                },
+                "body": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "deleted_at": {
+                    "type": "string"
+                },
+                "deleted_by_email": {
+                    "type": "string"
+                },
+                "edited_at": {
+                    "type": "string"
+                },
+                "edited_by_email": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "parent_id": {
+                    "type": "string"
+                },
+                "resolved_at": {
+                    "type": "string"
+                },
+                "resolved_by_email": {
+                    "type": "string"
+                },
+                "slug": {
+                    "type": "string"
+                },
+                "thread_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "comments.CreateInput": {
+            "type": "object",
+            "properties": {
+                "anchor": {
+                    "$ref": "#/definitions/comments.Anchor"
+                },
+                "body": {
+                    "type": "string"
+                }
+            }
+        },
+        "comments.EditInput": {
+            "type": "object",
+            "properties": {
+                "body": {
+                    "type": "string"
+                }
+            }
+        },
+        "comments.Rect": {
+            "type": "object",
+            "properties": {
+                "height": {
+                    "type": "integer"
+                },
+                "width": {
+                    "type": "integer"
+                },
+                "x": {
+                    "type": "integer"
+                },
+                "y": {
+                    "type": "integer"
+                }
+            }
+        },
+        "comments.ReplyInput": {
+            "type": "object",
+            "properties": {
+                "body": {
+                    "type": "string"
+                }
+            }
+        },
+        "comments.ResolveInput": {
+            "type": "object",
+            "properties": {
+                "resolved": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "comments.TextQuote": {
+            "type": "object",
+            "properties": {
+                "exact": {
+                    "type": "string"
+                },
+                "prefix": {
+                    "type": "string"
+                },
+                "suffix": {
+                    "type": "string"
+                }
+            }
+        },
+        "comments.Thread": {
+            "type": "object",
+            "properties": {
+                "replies": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/comments.Comment"
+                    }
+                },
+                "root": {
+                    "$ref": "#/definitions/comments.Comment"
                 }
             }
         }

@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 # ─── Builder ─────────────────────────────────────────────────────
-FROM golang:1.26-alpine AS builder
+FROM golang:1.26.8-alpine AS builder
 WORKDIR /app
 
 RUN apk add --no-cache git
@@ -12,6 +12,10 @@ RUN go mod download
 
 # Build
 COPY . .
+# Optional files are relative to the build context and never fetched remotely.
+ARG LLMS_TXT_APPEND=""
+ARG LLMS_TXT_OVERRIDE=""
+RUN go run ./cmd/build-llms -append "$LLMS_TXT_APPEND" -override "$LLMS_TXT_OVERRIDE"
 RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/server ./cmd/server
 
 # ─── Runtime ─────────────────────────────────────────────────────

@@ -23,6 +23,19 @@ var testdata embed.FS
 
 var baseURL string
 
+const integrationUserEmail = "integration-test@example.com"
+
+type identityTransport struct {
+	base http.RoundTripper
+}
+
+func (t identityTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	cloned := req.Clone(req.Context())
+	cloned.Header = req.Header.Clone()
+	cloned.Header.Set(troveUserEmailHeader, integrationUserEmail)
+	return t.base.RoundTrip(cloned)
+}
+
 func TestMain(m *testing.M) {
 	// When BASE_URL is set (e.g. inside docker-compose), skip compose lifecycle.
 	// Otherwise, start compose ourselves for local `make integration-test` usage.
@@ -87,7 +100,10 @@ func waitForHealth(url string, timeout time.Duration) error {
 
 func newClient() *http.Client {
 	jar, _ := cookiejar.New(nil)
-	return &http.Client{Jar: jar}
+	return &http.Client{
+		Jar:       jar,
+		Transport: identityTransport{base: http.DefaultTransport},
+	}
 }
 
 func fixture(t *testing.T, name string) []byte {
@@ -347,6 +363,7 @@ func TestDelete(t *testing.T) {
 
 func TestDeleteNotFound(t *testing.T) {
 	req, _ := http.NewRequest("DELETE", baseURL+"/delete/nonexistent-delete-test", nil)
+	req.Header.Set(troveUserEmailHeader, integrationUserEmail)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("DELETE: %v", err)
@@ -471,12 +488,15 @@ func mcpInit(t *testing.T) string {
 		Method:  "initialize",
 		Params: map[string]any{
 			"protocolVersion": "2024-11-05",
-			"capabilities":   map[string]any{},
-			"clientInfo":     map[string]any{"name": "integration-test", "version": "1.0"},
+			"capabilities":    map[string]any{},
+			"clientInfo":      map[string]any{"name": "integration-test", "version": "1.0"},
 		},
 	}
 	body, _ := json.Marshal(req)
-	resp, err := http.Post(baseURL+"/mcp", "application/json", bytes.NewReader(body))
+	httpReq, _ := http.NewRequest("POST", baseURL+"/mcp", bytes.NewReader(body))
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set(troveUserEmailHeader, integrationUserEmail)
+	resp, err := http.DefaultClient.Do(httpReq)
 	if err != nil {
 		t.Fatalf("POST /mcp initialize: %v", err)
 	}
@@ -507,6 +527,7 @@ func mcpCall(t *testing.T, sid string, id int, method string, params any) jsonrp
 	httpReq, _ := http.NewRequest("POST", baseURL+"/mcp", bytes.NewReader(body))
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Mcp-Session-Id", sid)
+	httpReq.Header.Set(troveUserEmailHeader, integrationUserEmail)
 
 	resp, err := http.DefaultClient.Do(httpReq)
 	if err != nil {
@@ -531,12 +552,15 @@ func TestMCPInitialize(t *testing.T) {
 		Method:  "initialize",
 		Params: map[string]any{
 			"protocolVersion": "2024-11-05",
-			"capabilities":   map[string]any{},
-			"clientInfo":     map[string]any{"name": "integration-test", "version": "1.0"},
+			"capabilities":    map[string]any{},
+			"clientInfo":      map[string]any{"name": "integration-test", "version": "1.0"},
 		},
 	}
 	body, _ := json.Marshal(req)
-	resp, err := http.Post(baseURL+"/mcp", "application/json", bytes.NewReader(body))
+	httpReq, _ := http.NewRequest("POST", baseURL+"/mcp", bytes.NewReader(body))
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set(troveUserEmailHeader, integrationUserEmail)
+	resp, err := http.DefaultClient.Do(httpReq)
 	if err != nil {
 		t.Fatalf("POST /mcp: %v", err)
 	}
@@ -609,9 +633,26 @@ func TestMCPListTools(t *testing.T) {
 		}
 	}
 
-	for _, want := range []string{"POST_upload", "GET_slug", "GET_slug_raw", "GET_llmstxt", "GET_mine"} {
+	for _, want := range []string{
+		"POST_upload",
+		"GET_slug",
+		"GET_slug_raw",
+		"GET_llmstxt",
+		"GET_mine",
+		"GET_api_artifacts_slug_comments",
+		"POST_api_artifacts_slug_comments",
+		"POST_api_artifacts_slug_comments_comment_id_replies",
+		"PATCH_api_artifacts_slug_comments_comment_id",
+		"DELETE_api_artifacts_slug_comments_comment_id",
+		"PATCH_api_artifacts_slug_comments_comment_id_resolution",
+	} {
 		if !toolNames[want] {
 			t.Errorf("expected tool %q in tools/list", want)
+		}
+	}
+	for _, unwanted := range []string{"GET__trove_commentscss", "GET__trove_commentsjs"} {
+		if toolNames[unwanted] {
+			t.Errorf("internal browser asset %q should not be exposed as a tool", unwanted)
 		}
 	}
 }
@@ -677,7 +718,7 @@ func TestMCPCallToolGetSlug(t *testing.T) {
 	}
 }
 
-func TestMCPDeleteNotExposed(t *testing.T) {
+func TestMCPArtifactDeleteNotExposed(t *testing.T) {
 	sid := mcpInit(t)
 	resp := mcpCall(t, sid, 2, "tools/list", map[string]any{})
 
@@ -689,8 +730,8 @@ func TestMCPDeleteNotExposed(t *testing.T) {
 	json.Unmarshal(resp.Result, &result)
 
 	for _, tool := range result.Tools {
-		if strings.Contains(strings.ToLower(tool.Name), "delete") {
-			t.Errorf("delete tool should not be exposed via MCP, found %q", tool.Name)
+		if tool.Name == "DELETE_delete_slug" {
+			t.Errorf("artifact delete tool should not be exposed via MCP, found %q", tool.Name)
 		}
 	}
 }
@@ -702,6 +743,7 @@ func TestMCPInvalidSession(t *testing.T) {
 	httpReq, _ := http.NewRequest("POST", baseURL+"/mcp", bytes.NewReader(body))
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Mcp-Session-Id", "bogus-session-id")
+	httpReq.Header.Set(troveUserEmailHeader, integrationUserEmail)
 
 	resp, err := http.DefaultClient.Do(httpReq)
 	if err != nil {

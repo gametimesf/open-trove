@@ -1,3 +1,4 @@
 bin/
 /server
 *.cover
+.DS_Store

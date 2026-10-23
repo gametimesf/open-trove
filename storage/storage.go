@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/gametimesf/open-trove/comments"
 	"github.com/gametimesf/open-trove/internal/config"
 )
 
@@ -18,22 +19,53 @@ var (
 
 // Store is the interface that storage backends must implement.
 type Store interface {
-	Put(ctx context.Context, slug string, body io.Reader, contentType, filename string, customSlug, overwrite bool) error
+	comments.Repository
+
+	Put(ctx context.Context, slug string, body io.Reader, opts PutOptions) error
 	Get(ctx context.Context, slug string, rangeHeader string) (io.ReadCloser, *FileMetadata, error)
 	Delete(ctx context.Context, slug string) error
 	Metadata(ctx context.Context, slug string) (*FileMetadata, error)
 	RecordUpload(ctx context.Context, userID string, record ActivityRecord) error
 	RecordView(ctx context.Context, userID string, record ActivityRecord) error
 	GetManifest(ctx context.Context, userID string) (*UserManifest, error)
+
+	// Site (multi-file) operations
+	PutSiteFile(ctx context.Context, siteSlug, path string, body io.Reader, contentType string) error
+	GetSiteFile(ctx context.Context, siteSlug, path string) (io.ReadCloser, *FileMetadata, error)
+	HeadSiteFile(ctx context.Context, siteSlug, path string) (*FileMetadata, error)
+	HeadSite(ctx context.Context, siteSlug string) (bool, error)
+	PutSiteManifest(ctx context.Context, siteSlug string, m *SiteManifest) error
+	GetSiteManifest(ctx context.Context, siteSlug string) (*SiteManifest, error)
+}
+
+// PutOptions describes a file upload, including attribution (not authorization).
+type PutOptions struct {
+	ContentType string
+	Filename    string
+	OwnerEmail  string
+	CustomSlug  bool
+	Overwrite   bool
+}
+
+// SiteManifest tracks metadata for a multi-file site upload.
+type SiteManifest struct {
+	Entry      string `json:"entry"`
+	FileCount  int    `json:"file_count"`
+	OwnerEmail string `json:"owner_email,omitempty"`
 }
 
 // FileMetadata holds metadata about a stored file.
 type FileMetadata struct {
-	ContentType   string
-	Filename      string
-	CustomSlug    bool
-	ContentRange  string // set on 206 partial-content responses
-	ContentLength int64  // bytes in this response body; set on 206 partial-content responses
+	OwnerEmail     string // uploader attribution, not verified ownership
+	ContentType    string
+	Filename       string
+	Version        string // storage-backed version identifier, currently the S3 ETag
+	CustomSlug     bool
+	Flagged        bool     // intake scanner detected sensitive content
+	FlagReason     string   // human-readable reason from the inspector
+	FlagCategories []string // tags like "hr", "executive", "customer_pii"
+	ContentRange   string   // set on 206 partial-content responses
+	ContentLength  int64    // bytes in this response body; set on 206 partial-content responses
 }
 
 // ActivityRecord represents a single upload or view event.
@@ -41,6 +73,8 @@ type ActivityRecord struct {
 	Slug        string `json:"slug"`
 	Filename    string `json:"filename"`
 	ContentType string `json:"content_type"`
+	UserEmail   string `json:"user_email,omitempty"`
+	OwnerEmail  string `json:"owner_email,omitempty"`
 	At          string `json:"at"`
 }
 

@@ -13,7 +13,7 @@ func TestPutAndGet(t *testing.T) {
 	store := NewStore()
 	ctx := context.Background()
 
-	err := store.Put(ctx, "test-slug", bytes.NewReader([]byte("hello")), "text/plain", "hello.txt", false, false)
+	err := store.Put(ctx, "test-slug", bytes.NewReader([]byte("hello")), storage.PutOptions{ContentType: "text/plain", Filename: "hello.txt", CustomSlug: false, Overwrite: false})
 	if err != nil {
 		t.Fatalf("Put: %v", err)
 	}
@@ -40,12 +40,12 @@ func TestPutConflict(t *testing.T) {
 	store := NewStore()
 	ctx := context.Background()
 
-	err := store.Put(ctx, "test", bytes.NewReader([]byte("a")), "text/plain", "a.txt", false, false)
+	err := store.Put(ctx, "test", bytes.NewReader([]byte("a")), storage.PutOptions{ContentType: "text/plain", Filename: "a.txt", CustomSlug: false, Overwrite: false})
 	if err != nil {
 		t.Fatalf("first Put: %v", err)
 	}
 
-	err = store.Put(ctx, "test", bytes.NewReader([]byte("b")), "text/plain", "b.txt", false, false)
+	err = store.Put(ctx, "test", bytes.NewReader([]byte("b")), storage.PutOptions{ContentType: "text/plain", Filename: "b.txt", CustomSlug: false, Overwrite: false})
 	if err != storage.ErrSlugConflict {
 		t.Errorf("expected ErrSlugConflict, got %v", err)
 	}
@@ -55,12 +55,12 @@ func TestPutOverwrite(t *testing.T) {
 	store := NewStore()
 	ctx := context.Background()
 
-	err := store.Put(ctx, "test", bytes.NewReader([]byte("a")), "text/plain", "a.txt", true, false)
+	err := store.Put(ctx, "test", bytes.NewReader([]byte("a")), storage.PutOptions{ContentType: "text/plain", Filename: "a.txt", CustomSlug: true, Overwrite: false})
 	if err != nil {
 		t.Fatalf("first Put: %v", err)
 	}
 
-	err = store.Put(ctx, "test", bytes.NewReader([]byte("b")), "text/plain", "b.txt", true, true)
+	err = store.Put(ctx, "test", bytes.NewReader([]byte("b")), storage.PutOptions{ContentType: "text/plain", Filename: "b.txt", CustomSlug: true, Overwrite: true})
 	if err != nil {
 		t.Fatalf("overwrite Put: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestMetadata(t *testing.T) {
 	store := NewStore()
 	ctx := context.Background()
 
-	err := store.Put(ctx, "doc", bytes.NewReader([]byte("<html>")), "text/html; charset=utf-8", "index.html", false, false)
+	err := store.Put(ctx, "doc", bytes.NewReader([]byte("<html>")), storage.PutOptions{ContentType: "text/html; charset=utf-8", Filename: "index.html", CustomSlug: false, Overwrite: false})
 	if err != nil {
 		t.Fatalf("Put: %v", err)
 	}
@@ -118,6 +118,25 @@ func TestMetadataNotFound(t *testing.T) {
 	_, err := store.Metadata(ctx, "nope")
 	if err != storage.ErrNotFound {
 		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestHeadSiteFile(t *testing.T) {
+	store := NewStore()
+	ctx := context.Background()
+	if err := store.PutSiteFile(ctx, "site", "index.html", bytes.NewReader([]byte("<html>")), "text/html; charset=utf-8"); err != nil {
+		t.Fatalf("PutSiteFile: %v", err)
+	}
+
+	meta, err := store.HeadSiteFile(ctx, "site", "index.html")
+	if err != nil {
+		t.Fatalf("HeadSiteFile: %v", err)
+	}
+	if meta.Filename != "index.html" || meta.ContentType != "text/html; charset=utf-8" || meta.Version == "" {
+		t.Fatalf("HeadSiteFile metadata = %#v", meta)
+	}
+	if _, err := store.HeadSiteFile(ctx, "site", "missing.html"); err != storage.ErrNotFound {
+		t.Fatalf("HeadSiteFile missing error = %v, want ErrNotFound", err)
 	}
 }
 

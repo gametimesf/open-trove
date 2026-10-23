@@ -6,3 +6,12 @@ store:
     bucket: "trove-uploads-development"
     endpoint: "http://localhost:9000"
     region: "us-east-1"
+
+uploads:
+  max_bytes: 209715200
+  max_site_files: 2000
+  max_site_bytes: 209715200
+  max_site_file_bytes: 104857600
+
+intake:
+  enabled: false
