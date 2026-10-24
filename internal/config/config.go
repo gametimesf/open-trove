@@ -31,7 +31,7 @@ type Config struct {
 // Auth configures verified identity. See docs/authentication.md.
 type Auth struct {
 	Mode             string           `yaml:"mode"`       // off (default), shadow, enforce
-	EnforceOn        string           `yaml:"enforce_on"` // writes (default), all
+	EnforceOn        string           `yaml:"enforce_on"` // writes (default; "all" is not supported yet)
 	CloudflareAccess CloudflareAccess `yaml:"cloudflare_access"`
 	Tokens           Tokens           `yaml:"tokens"`
 }
@@ -278,10 +278,10 @@ func (a *Auth) validate() error {
 	default:
 		return fmt.Errorf("config: auth.mode must be off, shadow, or enforce")
 	}
-	switch a.EnforceOn {
-	case "writes", "all":
-	default:
-		return fmt.Errorf("config: auth.enforce_on must be writes or all")
+	// "all" would also gate health checks and public assets; it needs a
+	// public-route design first (docs/authentication.md).
+	if a.EnforceOn != "writes" {
+		return fmt.Errorf("config: auth.enforce_on must be writes")
 	}
 	cf := &a.CloudflareAccess
 	cf.TeamDomain = strings.TrimSpace(cf.TeamDomain)

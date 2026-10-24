@@ -34,7 +34,9 @@ type Mode string
 const (
 	// ModeOff uses the asserted email only. It is the default.
 	ModeOff Mode = "off"
-	// ModeShadow verifies and reports credentials but keeps asserted behavior.
+	// ModeShadow verifies and reports credentials but keeps asserted behavior:
+	// handlers act on the asserted email when one is sent, and on the verified
+	// email only when none is.
 	ModeShadow Mode = "shadow"
 	// ModeEnforce acts on the verified principal and rejects missing or
 	// invalid credentials for requests in scope.
@@ -157,6 +159,9 @@ func (r *Resolver) Resolve(ctx context.Context, creds Credentials, write bool) D
 
 	if r.mode == ModeShadow {
 		d.Principal = asserted
+		if asserted.Email == "" {
+			d.Principal = d.Verified
+		}
 		return d
 	}
 

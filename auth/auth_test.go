@@ -57,6 +57,11 @@ func TestResolve(t *testing.T) {
 			wantVerified: "verified@example.com", wantMismatch: true,
 		},
 		{
+			name: "shadow uses verified when no email is asserted", mode: ModeShadow, verifier: good,
+			creds: Credentials{ProxyJWT: "good"}, write: true,
+			wantEmail: "verified@example.com", wantSource: SourceProxyJWT, wantVerified: "verified@example.com",
+		},
+		{
 			name: "shadow does not block invalid jwt", mode: ModeShadow, verifier: bad,
 			creds: Credentials{ProxyJWT: "bad", AssertedEmail: "asserted@example.com"}, write: true,
 			wantEmail: "asserted@example.com", wantSource: SourceAsserted, wantVerifyErr: true,

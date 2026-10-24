@@ -299,7 +299,8 @@ func TestValidateAuth(t *testing.T) {
 	}{
 		{name: "empty defaults to off and writes", auth: Auth{}, wantMode: "off", wantEnforceOn: "writes"},
 		{name: "shadow with cloudflare", auth: Auth{Mode: "shadow", CloudflareAccess: cf}, wantMode: "shadow", wantEnforceOn: "writes"},
-		{name: "enforce all with cloudflare", auth: Auth{Mode: "enforce", EnforceOn: "all", CloudflareAccess: cf}, wantMode: "enforce", wantEnforceOn: "all"},
+		{name: "enforce all is not supported yet", auth: Auth{Mode: "enforce", EnforceOn: "all", CloudflareAccess: cf}, wantErr: true},
+		{name: "enforce writes with cloudflare", auth: Auth{Mode: "enforce", CloudflareAccess: cf}, wantMode: "enforce", wantEnforceOn: "writes"},
 		{name: "off may preconfigure cloudflare", auth: Auth{Mode: "off", CloudflareAccess: cf}, wantMode: "off", wantEnforceOn: "writes"},
 		{name: "shadow without source", auth: Auth{Mode: "shadow"}, wantErr: true},
 		{name: "enforce without source", auth: Auth{Mode: "enforce"}, wantErr: true},

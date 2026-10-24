@@ -18,6 +18,15 @@ const CloudflareAccessHeader = "Cf-Access-Jwt-Assertion"
 // clockSkew tolerates small clock differences between Cloudflare and the origin.
 const clockSkew = 30 * time.Second
 
+const (
+	// jwksFetchTimeout bounds each key fetch so a hung endpoint can't stall
+	// startup (the first fetch runs before the server listens).
+	jwksFetchTimeout = 5 * time.Second
+	// jwksRefreshInterval also bounds how long a failed first fetch leaves
+	// the verifier without keys.
+	jwksRefreshInterval = 15 * time.Minute
+)
+
 // CloudflareAccess verifies Cloudflare Access application tokens using only
 // the team's published public keys; it holds no secret.
 type CloudflareAccess struct {
@@ -28,15 +37,18 @@ type CloudflareAccess struct {
 }
 
 // NewCloudflareAccess verifies tokens issued by teamDomain (for example
-// "example.cloudflareaccess.com") for the application audience tag. Keys are
-// fetched in the background and refreshed on an unknown key ID, so a JWKS
-// outage at startup does not prevent the service from starting.
+// "example.cloudflareaccess.com") for the application audience tag. A failed
+// or slow first key fetch (bounded by jwksFetchTimeout) does not prevent the
+// service from starting; keys refresh periodically and on an unknown key ID.
 func NewCloudflareAccess(ctx context.Context, teamDomain, audience string) (*CloudflareAccess, error) {
 	if teamDomain == "" || audience == "" {
 		return nil, fmt.Errorf("%w: cloudflare access requires team domain and audience", ErrInvalidConfig)
 	}
 	issuer := "https://" + teamDomain
-	jwks, err := keyfunc.NewDefaultCtx(ctx, []string{issuer + "/cdn-cgi/access/certs"})
+	jwks, err := keyfunc.NewDefaultOverrideCtx(ctx, []string{issuer + "/cdn-cgi/access/certs"}, keyfunc.Override{
+		HTTPTimeout:     jwksFetchTimeout,
+		RefreshInterval: jwksRefreshInterval,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("creating cloudflare access key set: %w", err)
 	}
