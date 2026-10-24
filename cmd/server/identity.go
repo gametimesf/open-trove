@@ -51,6 +51,10 @@ func requestIdentityMiddleware(resolver *auth.Resolver) echo.MiddlewareFunc {
 				log.Printf("WARN  identity verification failed method=%s path=%q mode=%s reason=%s",
 					req.Method, req.URL.Path, resolver.Mode(), auth.Reason(d.VerifyErr))
 			}
+			if d.Unavailable != nil {
+				log.Printf("ERROR auth unavailable method=%s path=%q reason=%s: %v", req.Method, req.URL.Path, auth.Reason(d.Unavailable), d.Unavailable)
+				return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "authentication temporarily unavailable"})
+			}
 			if d.Deny != nil {
 				log.Printf("WARN  auth denied method=%s path=%q reason=%s", req.Method, req.URL.Path, auth.Reason(d.Deny))
 				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "authentication required"})

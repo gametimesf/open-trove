@@ -58,6 +58,9 @@ var (
 	ErrInvalidCredential = errors.New("auth: invalid credential")
 	ErrMissingEmail      = errors.New("auth: credential has no email")
 	ErrInvalidConfig     = errors.New("auth: invalid configuration")
+	// ErrSourceUnavailable means a credential could not be checked because a
+	// dependency (such as the token store) failed. It is not the client's fault.
+	ErrSourceUnavailable = errors.New("auth: credential source unavailable")
 )
 
 // Credentials are the raw identity inputs on a request. Empty fields were not
@@ -87,6 +90,9 @@ type Decision struct {
 	VerifyErr error
 	// Deny is set when the request must be rejected as unauthenticated.
 	Deny error
+	// Unavailable is set in enforce mode when a presented credential could not
+	// be checked; the request should fail as temporarily unavailable.
+	Unavailable error
 }
 
 // TokenVerifier verifies a Trove personal access token and returns its owner.
@@ -165,8 +171,13 @@ func (r *Resolver) Resolve(ctx context.Context, creds Credentials, write bool) D
 		return d
 	}
 
-	// ModeEnforce. A credential that was presented but failed is always
-	// rejected rather than silently downgraded to a weaker source.
+	// ModeEnforce. A credential that couldn't be checked is an outage, not a
+	// bad credential. One that was checked and failed is always rejected
+	// rather than silently downgraded to a weaker source.
+	if errors.Is(d.VerifyErr, ErrSourceUnavailable) {
+		d.Unavailable = d.VerifyErr
+		return d
+	}
 	if d.VerifyErr != nil {
 		d.Deny = fmt.Errorf("%w: %w", ErrInvalidCredential, d.VerifyErr)
 		return d

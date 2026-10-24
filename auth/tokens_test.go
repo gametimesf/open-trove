@@ -87,8 +87,8 @@ func TestTokenServiceCreate(t *testing.T) {
 	}{
 		{name: "proxy session with default ttl", owner: proxyUser, tokenName: "laptop cli", wantExpiry: now.Add(DefaultTokenTTL)},
 		{name: "explicit ttl", owner: proxyUser, tokenName: "ci", ttl: 7 * 24 * time.Hour, wantExpiry: now.Add(7 * 24 * time.Hour)},
-		{name: "asserted email cannot mint", owner: assertedUser, tokenName: "x", wantErr: ErrMintNotVerified},
-		{name: "token cannot mint another token", owner: tokenUser, tokenName: "x", wantErr: ErrMintNotVerified},
+		{name: "asserted email cannot mint", owner: assertedUser, tokenName: "x", wantErr: ErrSessionRequired},
+		{name: "token cannot mint another token", owner: tokenUser, tokenName: "x", wantErr: ErrSessionRequired},
 		{name: "blank name", owner: proxyUser, tokenName: "  ", wantErr: ErrInvalidTokenInput},
 		{name: "name too long", owner: proxyUser, tokenName: strings.Repeat("n", 65), wantErr: ErrInvalidTokenInput},
 		{name: "ttl beyond max", owner: proxyUser, tokenName: "x", ttl: MaxTokenTTL + time.Hour, wantErr: ErrInvalidTokenInput},
@@ -180,17 +180,49 @@ func TestTokenServiceVerify(t *testing.T) {
 	}
 }
 
-func TestTokenServiceListAndRevokeRequireVerified(t *testing.T) {
+func TestTokenServiceManagementRequiresProxySession(t *testing.T) {
 	now := testNow
 	svc, _ := newTestTokenService(&now)
-	if _, err := svc.List(context.Background(), assertedUser); !errors.Is(err, ErrMissingCredential) {
-		t.Fatalf("List(asserted) error = %v", err)
+	for _, p := range []Principal{assertedUser, tokenUser} {
+		if _, err := svc.List(context.Background(), p); !errors.Is(err, ErrSessionRequired) {
+			t.Errorf("List(%s) error = %v, want ErrSessionRequired", p.Source, err)
+		}
+		if err := svc.Revoke(context.Background(), p, "id"); !errors.Is(err, ErrSessionRequired) {
+			t.Errorf("Revoke(%s) error = %v, want ErrSessionRequired", p.Source, err)
+		}
 	}
-	if err := svc.Revoke(context.Background(), assertedUser, "id"); !errors.Is(err, ErrMissingCredential) {
-		t.Fatalf("Revoke(asserted) error = %v", err)
+	if _, err := svc.List(context.Background(), proxyUser); err != nil {
+		t.Fatalf("List(proxy session) error = %v", err)
 	}
-	if _, err := svc.List(context.Background(), tokenUser); err != nil {
-		t.Fatalf("List(token principal) error = %v", err)
+}
+
+// failingTokens simulates a token store outage.
+type failingTokens struct{ memoryTokens }
+
+func (failingTokens) GetToken(context.Context, string) (Token, error) {
+	return Token{}, errors.New("s3: connection reset")
+}
+
+func TestTokenStoreOutageIsUnavailable(t *testing.T) {
+	svc := NewTokenService(&failingTokens{})
+	token := TokenPrefix + strings.Repeat("A", 43)
+	if _, err := svc.Verify(context.Background(), token); !errors.Is(err, ErrSourceUnavailable) {
+		t.Fatalf("Verify() error = %v, want ErrSourceUnavailable", err)
+	}
+
+	enforce, _ := NewResolver(ModeEnforce, EnforceWrites, Sources{Tokens: svc})
+	d := enforce.Resolve(context.Background(), Credentials{BearerToken: token}, false)
+	if d.Unavailable == nil || d.Deny != nil {
+		t.Fatalf("enforce decision = %+v, want Unavailable and no Deny", d)
+	}
+	if Reason(d.Unavailable) != "unavailable" {
+		t.Errorf("Reason = %q, want unavailable", Reason(d.Unavailable))
+	}
+
+	shadow, _ := NewResolver(ModeShadow, EnforceWrites, Sources{Tokens: svc})
+	d = shadow.Resolve(context.Background(), Credentials{BearerToken: token, AssertedEmail: "a@example.com"}, true)
+	if d.Unavailable != nil || d.Deny != nil || d.Principal.Email != "a@example.com" {
+		t.Fatalf("shadow decision = %+v, want asserted principal and nothing blocked", d)
 	}
 }
 

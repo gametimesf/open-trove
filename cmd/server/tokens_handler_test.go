@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -84,7 +86,10 @@ func TestTokenLifecycleEnforce(t *testing.T) {
 		t.Fatalf("token write as %q (status %d), want %q", who.Body.String(), who.Code, tokenTestEmail)
 	}
 
-	list := doTokenRequest(t, e, tokenRequest{method: http.MethodGet, path: "/api/tokens", bearer: mint.Token})
+	if rec := doTokenRequest(t, e, tokenRequest{method: http.MethodGet, path: "/api/tokens", bearer: mint.Token}); rec.Code != http.StatusForbidden {
+		t.Fatalf("token listing tokens status = %d, want 403", rec.Code)
+	}
+	list := doTokenRequest(t, e, tokenRequest{method: http.MethodGet, path: "/api/tokens", jwt: tokenTestJWT})
 	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), mint.ID) {
 		t.Fatalf("list status = %d: %s", list.Code, list.Body.String())
 	}
@@ -95,6 +100,9 @@ func TestTokenLifecycleEnforce(t *testing.T) {
 	minted := doTokenRequest(t, e, tokenRequest{method: http.MethodPost, path: "/api/tokens", body: `{"name":"chained"}`, bearer: mint.Token})
 	if minted.Code != http.StatusForbidden {
 		t.Fatalf("token minting another token status = %d, want 403", minted.Code)
+	}
+	if rec := doTokenRequest(t, e, tokenRequest{method: http.MethodDelete, path: "/api/tokens/" + mint.ID, bearer: mint.Token}); rec.Code != http.StatusForbidden {
+		t.Fatalf("token revoking tokens status = %d, want 403", rec.Code)
 	}
 
 	revoked := doTokenRequest(t, e, tokenRequest{method: http.MethodDelete, path: "/api/tokens/" + mint.ID, jwt: tokenTestJWT})
@@ -193,5 +201,28 @@ func TestMyTroveTokenSection(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// outageTokens fails every lookup, like an S3 outage.
+type outageTokens struct{ auth.TokenRepository }
+
+func (outageTokens) GetToken(context.Context, string) (auth.Token, error) {
+	return auth.Token{}, errors.New("s3: connection reset")
+}
+
+func TestTokenStoreOutageReturns503(t *testing.T) {
+	srv, store := newTestServer()
+	tokens := auth.NewTokenService(outageTokens{TokenRepository: store})
+	resolver, err := auth.NewResolver(auth.ModeEnforce, auth.EnforceWrites, auth.Sources{Tokens: tokens})
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	srv.identity = resolver
+	e := echo.New()
+	registerRoutes(e, srv)
+	rec := doTokenRequest(t, e, tokenRequest{method: http.MethodGet, path: "/healthz", bearer: auth.TokenPrefix + strings.Repeat("A", 43)})
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503: %s", rec.Code, rec.Body.String())
 	}
 }

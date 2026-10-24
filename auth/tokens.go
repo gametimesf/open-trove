@@ -34,11 +34,13 @@ const (
 
 // Token errors.
 var (
-	ErrTokenNotFound     = errors.New("auth: token not found")
-	ErrTokenExpired      = errors.New("auth: token expired")
-	ErrTokenExists       = errors.New("auth: token already exists")
-	ErrTokenMalformed    = errors.New("auth: malformed token")
-	ErrMintNotVerified   = errors.New("auth: creating tokens requires a verified identity-proxy session")
+	ErrTokenNotFound  = errors.New("auth: token not found")
+	ErrTokenExpired   = errors.New("auth: token expired")
+	ErrTokenExists    = errors.New("auth: token already exists")
+	ErrTokenMalformed = errors.New("auth: malformed token")
+	// ErrSessionRequired means token management was attempted without a
+	// verified identity-proxy session (an asserted email or a token).
+	ErrSessionRequired   = errors.New("auth: managing tokens requires a verified identity-proxy session")
 	ErrInvalidTokenInput = errors.New("auth: invalid token request")
 )
 
@@ -86,12 +88,18 @@ func NewTokenService(repo TokenRepository) *TokenService {
 	return &TokenService{repo: repo, now: time.Now, random: rand.Reader}
 }
 
-// Create mints a token for owner. Only principals verified by a source other
-// than a token may mint, so an asserted email or a leaked token can't create
-// more credentials. It returns the plaintext, which must be shown once.
+// canManage reports whether p may create, list or revoke tokens. Only an
+// identity-proxy session qualifies, so an asserted email can't manage tokens
+// and a leaked token can't mint more or revoke its owner's others.
+func canManage(p Principal) bool {
+	return p.Verified && p.Source == SourceProxyJWT && p.Email != ""
+}
+
+// Create mints a token for owner and returns the plaintext, which must be
+// shown once.
 func (s *TokenService) Create(ctx context.Context, owner Principal, name string, ttl time.Duration) (string, Token, error) {
-	if !owner.Verified || owner.Source == SourceToken || owner.Email == "" {
-		return "", Token{}, ErrMintNotVerified
+	if !canManage(owner) {
+		return "", Token{}, ErrSessionRequired
 	}
 	name = strings.TrimSpace(name)
 	if name == "" || utf8.RuneCountInString(name) > maxTokenNameLength {
@@ -134,7 +142,10 @@ func (s *TokenService) Verify(ctx context.Context, plaintext string) (string, er
 	}
 	token, err := s.repo.GetToken(ctx, hashToken(plaintext))
 	if err != nil {
-		return "", err
+		if errors.Is(err, ErrTokenNotFound) {
+			return "", err
+		}
+		return "", fmt.Errorf("%w: %w", ErrSourceUnavailable, err)
 	}
 	now := s.now().UTC()
 	if !now.Before(token.ExpiresAt) {
@@ -149,8 +160,8 @@ func (s *TokenService) Verify(ctx context.Context, plaintext string) (string, er
 
 // List returns the owner's tokens.
 func (s *TokenService) List(ctx context.Context, owner Principal) ([]Token, error) {
-	if !owner.Verified || owner.Email == "" {
-		return nil, ErrMissingCredential
+	if !canManage(owner) {
+		return nil, ErrSessionRequired
 	}
 	tokens, err := s.repo.ListTokens(ctx, owner.Email)
 	if err != nil {
@@ -161,8 +172,8 @@ func (s *TokenService) List(ctx context.Context, owner Principal) ([]Token, erro
 
 // Revoke deletes one of the owner's tokens.
 func (s *TokenService) Revoke(ctx context.Context, owner Principal, id string) error {
-	if !owner.Verified || owner.Email == "" {
-		return ErrMissingCredential
+	if !canManage(owner) {
+		return ErrSessionRequired
 	}
 	if err := s.repo.DeleteToken(ctx, owner.Email, id); err != nil {
 		return fmt.Errorf("revoking token: %w", err)

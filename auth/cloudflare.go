@@ -94,6 +94,8 @@ func Reason(err error) string {
 		return ""
 	case errors.Is(err, ErrMissingCredential):
 		return "missing"
+	case errors.Is(err, ErrSourceUnavailable):
+		return "unavailable"
 	case errors.Is(err, ErrMissingEmail):
 		return "missing_email"
 	case errors.Is(err, ErrTokenNotFound):

@@ -34,8 +34,8 @@ func toTokenResponse(t auth.Token) tokenResponse {
 }
 
 // handleCreateToken mints a personal access token for the verified caller.
-// Tokens can only be created from an identity-proxy session; an asserted
-// email or another token is refused.
+// Tokens can only be managed from an identity-proxy session; an asserted
+// email or a token is refused.
 func (s *server) handleCreateToken(c echo.Context) error {
 	var req createTokenRequest
 	if err := c.Bind(&req); err != nil {
@@ -47,7 +47,7 @@ func (s *server) handleCreateToken(c echo.Context) error {
 	ttl := time.Duration(req.ExpiresInDays) * 24 * time.Hour
 	plaintext, token, err := s.tokens.Create(c.Request().Context(), verifiedPrincipal(c), req.Name, ttl)
 	switch {
-	case errors.Is(err, auth.ErrMintNotVerified):
+	case errors.Is(err, auth.ErrSessionRequired):
 		return c.JSON(http.StatusForbidden, map[string]string{"error": "creating tokens requires a verified sign-in"})
 	case errors.Is(err, auth.ErrInvalidTokenInput):
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -63,7 +63,7 @@ func (s *server) handleCreateToken(c echo.Context) error {
 func (s *server) handleListTokens(c echo.Context) error {
 	tokens, err := s.tokens.List(c.Request().Context(), verifiedPrincipal(c))
 	switch {
-	case errors.Is(err, auth.ErrMissingCredential):
+	case errors.Is(err, auth.ErrSessionRequired):
 		return c.JSON(http.StatusForbidden, map[string]string{"error": "listing tokens requires a verified sign-in"})
 	case err != nil:
 		log.Printf("ERROR listing tokens user_email=%q: %v", verifiedPrincipal(c).Email, err)
@@ -81,7 +81,7 @@ func (s *server) handleRevokeToken(c echo.Context) error {
 	owner := verifiedPrincipal(c)
 	err := s.tokens.Revoke(c.Request().Context(), owner, c.Param("id"))
 	switch {
-	case errors.Is(err, auth.ErrMissingCredential):
+	case errors.Is(err, auth.ErrSessionRequired):
 		return c.JSON(http.StatusForbidden, map[string]string{"error": "revoking tokens requires a verified sign-in"})
 	case errors.Is(err, auth.ErrTokenNotFound):
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "token not found"})
