@@ -26,6 +26,18 @@ type Config struct {
 	ShareURLRules   []ShareURLRule `yaml:"share_url_rules"`
 	ContentReview   ContentReview  `yaml:"content_review"`
 	Auth            Auth           `yaml:"auth"`
+	Slack           Slack          `yaml:"slack"`
+}
+
+// Slack configures the optional Slack app (docs/slack.md). Tokens are read only
+// from SLACK_BOT_TOKEN and SLACK_APP_TOKEN, never from YAML.
+type Slack struct {
+	Enabled       bool `yaml:"enabled"`
+	Notifications bool `yaml:"notifications"` // comment DMs; default true
+	Unfurls       bool `yaml:"unfurls"`       // link previews over Socket Mode; default true
+
+	BotToken string `yaml:"-"`
+	AppToken string `yaml:"-"`
 }
 
 // Auth configures verified identity. See docs/authentication.md.
@@ -136,6 +148,10 @@ func Load() (*Config, error) {
 			Mode:      "off",
 			EnforceOn: "writes",
 		},
+		Slack: Slack{
+			Notifications: true,
+			Unfurls:       true,
+		},
 	}
 
 	configFile, err := configPath()
@@ -165,6 +181,8 @@ func Load() (*Config, error) {
 	if value := strings.TrimSpace(os.Getenv("TROVE_BASE_URL")); value != "" {
 		cfg.BaseURL = value
 	}
+	cfg.Slack.BotToken = strings.TrimSpace(os.Getenv("SLACK_BOT_TOKEN"))
+	cfg.Slack.AppToken = strings.TrimSpace(os.Getenv("SLACK_APP_TOKEN"))
 
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = fmt.Sprintf("http://localhost:%s", cfg.Port)
@@ -263,7 +281,26 @@ func (c *Config) Validate() error {
 			rule.PathPrefix = strings.TrimSuffix(path.Clean(rule.PathPrefix), "/")
 		}
 	}
-	return c.Auth.validate()
+	if err := c.Auth.validate(); err != nil {
+		return err
+	}
+	return c.Slack.validate()
+}
+
+func (s *Slack) validate() error {
+	if !s.Enabled {
+		return nil
+	}
+	if !s.Notifications && !s.Unfurls {
+		return fmt.Errorf("config: slack.enabled needs notifications or unfurls")
+	}
+	if !strings.HasPrefix(s.BotToken, "xoxb-") {
+		return fmt.Errorf("config: slack.enabled requires SLACK_BOT_TOKEN (a bot token, xoxb-)")
+	}
+	if s.Unfurls && !strings.HasPrefix(s.AppToken, "xapp-") {
+		return fmt.Errorf("config: slack.unfurls requires SLACK_APP_TOKEN (an app-level token, xapp-) for Socket Mode")
+	}
+	return nil
 }
 
 func (a *Auth) validate() error {

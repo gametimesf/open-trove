@@ -40,6 +40,11 @@ func main() {
 		log.Fatalf("initializing upload intake: %v", err)
 	}
 
+	commentOptions, err := startSlack(ctx, cfg.Slack, cfg.BaseURL, store)
+	if err != nil {
+		log.Fatalf("initializing slack: %v", err)
+	}
+
 	identity, tokens, err := newIdentityResolver(ctx, cfg.Auth, store)
 	if err != nil {
 		log.Fatalf("initializing identity: %v", err)
@@ -52,7 +57,7 @@ func main() {
 		llmsTxtOverride: cfg.LLMSTxtOverride,
 		llmsTxtAppend:   cfg.LLMSTxtAppend,
 		store:           store,
-		comments:        comments.NewService(store),
+		comments:        comments.NewService(store, commentOptions...),
 		baseURL:         cfg.BaseURL,
 		intake:          inspector,
 		intakeFail:      failMode,
