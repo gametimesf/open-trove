@@ -104,9 +104,10 @@ proxy's browser login:
 ### Asserted email
 
 Today's behavior. It stays available, and is the default, so self-hosted
-deployments without an identity proxy keep working unchanged. Operators who
-enable verification must also turn it off, otherwise a client can bypass the
-verified sources by sending only the header.
+deployments without an identity proxy keep working unchanged. In `enforce`
+mode an asserted email never satisfies a request in scope, so sending only the
+header can't bypass the verified sources. It still attributes out-of-scope
+reads for logs and history.
 
 ## Modes
 
@@ -114,7 +115,6 @@ verified sources by sending only the header.
 auth:
   mode: off          # off | shadow | enforce
   enforce_on: writes # writes | all (enforce only)
-  allow_asserted: true
   cloudflare_access:
     team_domain: "example.cloudflareaccess.com"
     audience: "<application audience tag>"
@@ -126,7 +126,7 @@ auth:
 |---|---|---|
 | `off` | Asserted email only. The current behavior and the default. | Writes without an email return 400, as today. |
 | `shadow` | All configured sources are evaluated and logged. Handlers still receive the asserted email when it is present, so behavior is unchanged. | Nothing new is blocked. |
-| `enforce` | Handlers receive the verified principal. | Requests in `enforce_on` scope without a verified principal return 401. An invalid credential always returns 401. |
+| `enforce` | Handlers receive the verified principal; out-of-scope requests without one keep asserted attribution. | Requests in `enforce_on` scope without a verified principal return 401. An invalid credential always returns 401. |
 
 Startup fails if `enforce` is set without at least one verified source
 configured, or if `cloudflare_access` is configured without both fields.
