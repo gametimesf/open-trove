@@ -84,6 +84,12 @@ func Reason(err error) string {
 		return "missing"
 	case errors.Is(err, ErrMissingEmail):
 		return "missing_email"
+	case errors.Is(err, ErrTokenNotFound):
+		return "unknown_token"
+	case errors.Is(err, ErrTokenExpired):
+		return "expired_token"
+	case errors.Is(err, ErrTokenMalformed):
+		return "malformed_token"
 	case errors.Is(err, jwt.ErrTokenExpired):
 		return "expired"
 	case errors.Is(err, jwt.ErrTokenInvalidAudience):

@@ -46,7 +46,10 @@ request. It is required for `POST`, `PUT`, `PATCH`, and `DELETE`.
 
 The server validates the address format but does not verify ownership. Put
 Trove behind your own authentication and authorization layer when access
-control matters.
+control matters. Verified identity sources (identity-proxy JWTs and personal
+access tokens) are configured under `auth`. With `auth.tokens.enabled`, signed-in
+users create personal access tokens on My Trove and send them as
+`Authorization: Bearer trv_...`.
 
 ```bash
 export TROVE_BASE_URL=http://localhost:8080
@@ -129,6 +132,8 @@ auth:
   cloudflare_access:
     team_domain: "" # e.g. example.cloudflareaccess.com
     audience: "" # Access application AUD tag
+  tokens:
+    enabled: false # personal access tokens; needs shadow/enforce + cloudflare_access
 
 intake:
   enabled: false

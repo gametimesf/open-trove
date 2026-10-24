@@ -38,6 +38,8 @@ type server struct {
 	intn func(n int) int
 	// identity resolves each request's principal; see docs/authentication.md.
 	identity *auth.Resolver
+	// tokens issues and verifies personal access tokens; nil when disabled.
+	tokens *auth.TokenService
 }
 
 type shareURLRule struct {
@@ -274,6 +276,15 @@ func handleFaviconPNG(c echo.Context) error {
 func handleAppleTouchIcon(c echo.Context) error {
 	c.Response().Header().Set(echo.HeaderCacheControl, staticIconMaxAge)
 	return c.Blob(http.StatusOK, "image/png", favicon.AppleTouchIcon)
+}
+
+// myTroveView builds the My Trove page model for the current request.
+func (s *server) myTroveView(c echo.Context, manifest *storage.UserManifest) myTroveView {
+	view := myTroveView{UserManifest: manifest, TokensEnabled: s.tokens != nil}
+	if p := verifiedPrincipal(c); p.Source == auth.SourceProxyJWT {
+		view.VerifiedEmail = p.Email
+	}
+	return view
 }
 
 // handleIndex godoc
@@ -550,7 +561,7 @@ func (s *server) handleMine(c echo.Context) error {
 	log.Printf("INFO  user %s accessing /mine", uid)
 	if uid == "" {
 		c.Response().Header().Set(echo.HeaderContentType, "text/html; charset=utf-8")
-		return myTroveTemplate.Execute(c.Response(), &storage.UserManifest{})
+		return myTroveTemplate.Execute(c.Response(), s.myTroveView(c, &storage.UserManifest{}))
 	}
 
 	manifest, err := s.store.GetManifest(c.Request().Context(), uid)
@@ -560,7 +571,7 @@ func (s *server) handleMine(c echo.Context) error {
 	}
 
 	c.Response().Header().Set(echo.HeaderContentType, "text/html; charset=utf-8")
-	return myTroveTemplate.Execute(c.Response(), manifest)
+	return myTroveTemplate.Execute(c.Response(), s.myTroveView(c, manifest))
 }
 
 // handleRaw godoc

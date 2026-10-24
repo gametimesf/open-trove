@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/gametimesf/open-trove/auth"
 	"github.com/gametimesf/open-trove/internal/config"
@@ -17,6 +18,8 @@ const (
 
 	userEmailContextKey       = "trove_user_email"
 	userEmailSourceContextKey = "trove_user_email_source"
+	// verifiedPrincipalContextKey holds the auth.Principal proven by a verified source.
+	verifiedPrincipalContextKey = "trove_verified_principal"
 )
 
 // requestIdentityMiddleware resolves user identity on every request. Asserted
@@ -31,6 +34,7 @@ func requestIdentityMiddleware(resolver *auth.Resolver) echo.MiddlewareFunc {
 			asserted, assertedSource := resolveRequestUserEmail(req)
 			write := isWriteMethod(req.Method)
 			d := resolver.Resolve(req.Context(), auth.Credentials{
+				BearerToken:   bearerTroveToken(req),
 				ProxyJWT:      req.Header.Get(auth.CloudflareAccessHeader),
 				AssertedEmail: asserted,
 			}, write)
@@ -52,6 +56,9 @@ func requestIdentityMiddleware(resolver *auth.Resolver) echo.MiddlewareFunc {
 				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "authentication required"})
 			}
 
+			if d.Verified.Verified {
+				c.Set(verifiedPrincipalContextKey, d.Verified)
+			}
 			if d.Principal.Email != "" {
 				c.Set(userEmailContextKey, d.Principal.Email)
 				c.Set(userEmailSourceContextKey, source)
@@ -73,22 +80,50 @@ func requestIdentityMiddleware(resolver *auth.Resolver) echo.MiddlewareFunc {
 	}
 }
 
-// newIdentityResolver builds the request identity resolver from configuration.
-// Off mode with no verified source reproduces asserted-only attribution.
-func newIdentityResolver(ctx context.Context, cfg config.Auth) (*auth.Resolver, error) {
-	var proxy auth.ProxyVerifier
+// newIdentityResolver builds the request identity resolver, and the token
+// service when tokens are enabled, from configuration. Off mode with no
+// verified source reproduces asserted-only attribution.
+func newIdentityResolver(ctx context.Context, cfg config.Auth, tokenRepo auth.TokenRepository) (*auth.Resolver, *auth.TokenService, error) {
+	var sources auth.Sources
 	if cfg.CloudflareAccess.Configured() {
 		verifier, err := auth.NewCloudflareAccess(ctx, cfg.CloudflareAccess.TeamDomain, cfg.CloudflareAccess.Audience)
 		if err != nil {
-			return nil, fmt.Errorf("configuring cloudflare access: %w", err)
+			return nil, nil, fmt.Errorf("configuring cloudflare access: %w", err)
 		}
-		proxy = verifier
+		sources.Proxy = verifier
 	}
-	resolver, err := auth.NewResolver(auth.Mode(cfg.Mode), auth.EnforceOn(cfg.EnforceOn), proxy)
+	var tokens *auth.TokenService
+	if cfg.Tokens.Enabled {
+		tokens = auth.NewTokenService(tokenRepo)
+		sources.Tokens = tokens
+	}
+	resolver, err := auth.NewResolver(auth.Mode(cfg.Mode), auth.EnforceOn(cfg.EnforceOn), sources)
 	if err != nil {
-		return nil, fmt.Errorf("configuring identity resolver: %w", err)
+		return nil, nil, fmt.Errorf("configuring identity resolver: %w", err)
 	}
-	return resolver, nil
+	return resolver, tokens, nil
+}
+
+// bearerTroveToken returns a Trove personal access token from the
+// Authorization header, or "" when the header is absent or carries another
+// scheme or credential type.
+func bearerTroveToken(r *http.Request) string {
+	scheme, value, ok := strings.Cut(r.Header.Get(echo.HeaderAuthorization), " ")
+	if !ok || !strings.EqualFold(scheme, "Bearer") {
+		return ""
+	}
+	value = strings.TrimSpace(value)
+	if !strings.HasPrefix(value, auth.TokenPrefix) {
+		return ""
+	}
+	return value
+}
+
+// verifiedPrincipal returns the principal proven by a verified source, even in
+// shadow mode where handlers otherwise act on the asserted email.
+func verifiedPrincipal(c echo.Context) auth.Principal {
+	p, _ := c.Get(verifiedPrincipalContextKey).(auth.Principal)
+	return p
 }
 
 func resolveRequestUserEmail(r *http.Request) (string, string) {

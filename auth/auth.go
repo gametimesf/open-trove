@@ -61,6 +61,7 @@ var (
 // Credentials are the raw identity inputs on a request. Empty fields were not
 // presented. AssertedEmail must already be normalized (see NormalizeEmail).
 type Credentials struct {
+	BearerToken   string // value after "Bearer ", only when it has TokenPrefix
 	ProxyJWT      string
 	AssertedEmail string
 }
@@ -86,20 +87,33 @@ type Decision struct {
 	Deny error
 }
 
+// TokenVerifier verifies a Trove personal access token and returns its owner.
+type TokenVerifier interface {
+	Verify(ctx context.Context, token string) (string, error)
+}
+
+// Sources are the verified credential sources available to a Resolver. Nil
+// fields are not configured.
+type Sources struct {
+	Proxy  ProxyVerifier
+	Tokens TokenVerifier
+}
+
 // Resolver applies a mode to the credentials on each request.
 type Resolver struct {
 	mode      Mode
 	enforceOn EnforceOn
-	proxy     ProxyVerifier
+	sources   Sources
 }
 
-// NewResolver validates the combination of mode, scope and verifier. Shadow
-// and enforce modes require a verifier; there is nothing to verify without one.
-func NewResolver(mode Mode, enforceOn EnforceOn, proxy ProxyVerifier) (*Resolver, error) {
+// NewResolver validates the combination of mode, scope and sources. Shadow
+// and enforce modes require a verified source; there is nothing to verify
+// without one.
+func NewResolver(mode Mode, enforceOn EnforceOn, sources Sources) (*Resolver, error) {
 	switch mode {
 	case ModeOff:
 	case ModeShadow, ModeEnforce:
-		if proxy == nil {
+		if sources.Proxy == nil && sources.Tokens == nil {
 			return nil, fmt.Errorf("%w: mode %q requires a verified credential source", ErrInvalidConfig, mode)
 		}
 	default:
@@ -110,7 +124,7 @@ func NewResolver(mode Mode, enforceOn EnforceOn, proxy ProxyVerifier) (*Resolver
 	default:
 		return nil, fmt.Errorf("%w: unknown enforcement scope %q", ErrInvalidConfig, enforceOn)
 	}
-	return &Resolver{mode: mode, enforceOn: enforceOn, proxy: proxy}, nil
+	return &Resolver{mode: mode, enforceOn: enforceOn, sources: sources}, nil
 }
 
 // Mode reports the resolver's mode.
@@ -131,13 +145,13 @@ func (r *Resolver) Resolve(ctx context.Context, creds Credentials, write bool) D
 		return d
 	}
 
-	if creds.ProxyJWT != "" {
-		email, err := r.proxy.Verify(ctx, creds.ProxyJWT)
-		if err != nil {
-			d.VerifyErr = err
-		} else {
-			d.Verified = Principal{Email: email, Source: SourceProxyJWT, Verified: true}
-		}
+	// The first configured source that presents a credential decides; a
+	// presented credential is never skipped in favor of a later source.
+	switch {
+	case creds.BearerToken != "" && r.sources.Tokens != nil:
+		d.Verified, d.VerifyErr = verify(ctx, r.sources.Tokens, creds.BearerToken, SourceToken)
+	case creds.ProxyJWT != "" && r.sources.Proxy != nil:
+		d.Verified, d.VerifyErr = verify(ctx, r.sources.Proxy, creds.ProxyJWT, SourceProxyJWT)
 	}
 	d.Mismatch = d.Verified.Email != "" && asserted.Email != "" && d.Verified.Email != asserted.Email
 
@@ -163,6 +177,18 @@ func (r *Resolver) Resolve(ctx context.Context, creds Credentials, write bool) D
 	// Out-of-scope reads keep asserted attribution for logs and history.
 	d.Principal = asserted
 	return d
+}
+
+type verifier interface {
+	Verify(ctx context.Context, credential string) (string, error)
+}
+
+func verify(ctx context.Context, v verifier, credential string, source Source) (Principal, error) {
+	email, err := v.Verify(ctx, credential)
+	if err != nil {
+		return Principal{}, err
+	}
+	return Principal{Email: email, Source: source, Verified: true}, nil
 }
 
 // NormalizeEmail returns the lowercase address, or "" when value is not a

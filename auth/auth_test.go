@@ -99,7 +99,7 @@ func TestResolve(t *testing.T) {
 			if enforceOn == "" {
 				enforceOn = EnforceWrites
 			}
-			r, err := NewResolver(tt.mode, enforceOn, tt.verifier)
+			r, err := NewResolver(tt.mode, enforceOn, Sources{Proxy: tt.verifier})
 			if err != nil {
 				t.Fatalf("NewResolver: %v", err)
 			}
@@ -152,7 +152,7 @@ func TestNewResolverValidation(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := NewResolver(tt.mode, tt.enforceOn, tt.verifier)
+			_, err := NewResolver(tt.mode, tt.enforceOn, Sources{Proxy: tt.verifier})
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("NewResolver() error = %v, wantErr %v", err, tt.wantErr)
 			}

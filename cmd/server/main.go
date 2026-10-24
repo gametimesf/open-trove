@@ -40,14 +40,15 @@ func main() {
 		log.Fatalf("initializing upload intake: %v", err)
 	}
 
-	identity, err := newIdentityResolver(ctx, cfg.Auth)
+	identity, tokens, err := newIdentityResolver(ctx, cfg.Auth, store)
 	if err != nil {
 		log.Fatalf("initializing identity: %v", err)
 	}
-	log.Printf("identity mode=%s enforce_on=%s cloudflare_access=%t", cfg.Auth.Mode, cfg.Auth.EnforceOn, cfg.Auth.CloudflareAccess.Configured())
+	log.Printf("identity mode=%s enforce_on=%s cloudflare_access=%t tokens=%t", cfg.Auth.Mode, cfg.Auth.EnforceOn, cfg.Auth.CloudflareAccess.Configured(), cfg.Auth.Tokens.Enabled)
 
 	srv := &server{
 		identity:        identity,
+		tokens:          tokens,
 		llmsTxtOverride: cfg.LLMSTxtOverride,
 		llmsTxtAppend:   cfg.LLMSTxtAppend,
 		store:           store,
@@ -88,6 +89,8 @@ func main() {
 	// routes can coexist. Internal browser assets are not tools.
 	mcp.ExcludeEndpoints([]string{
 		"/healthz",
+		"/api/tokens",
+		"/api/tokens/*",
 		"/swagger/*",
 		"/_trove/*",
 		"/mcp",
@@ -125,6 +128,13 @@ func registerRoutes(e *echo.Echo, srv *server) {
 	e.PATCH("/api/artifacts/:slug/comments/:comment_id", srv.handleEditComment)
 	e.DELETE("/api/artifacts/:slug/comments/:comment_id", srv.handleDeleteComment)
 	e.PATCH("/api/artifacts/:slug/comments/:comment_id/resolution", srv.handleResolveCommentThread)
+
+	// Personal access tokens, only when enabled.
+	if srv.tokens != nil {
+		e.POST("/api/tokens", srv.handleCreateToken)
+		e.GET("/api/tokens", srv.handleListTokens)
+		e.DELETE("/api/tokens/:id", srv.handleRevokeToken)
+	}
 
 	// User-tracked routes
 	e.GET("/", srv.handleIndex, userIDMiddleware)

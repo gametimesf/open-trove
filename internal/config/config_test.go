@@ -308,6 +308,9 @@ func TestValidateAuth(t *testing.T) {
 		{name: "audience without team", auth: Auth{CloudflareAccess: CloudflareAccess{Audience: "aud-tag"}}, wantErr: true},
 		{name: "team without audience", auth: Auth{CloudflareAccess: CloudflareAccess{TeamDomain: "team.example.com"}}, wantErr: true},
 		{name: "team with scheme", auth: Auth{CloudflareAccess: CloudflareAccess{TeamDomain: "https://team.example.com", Audience: "aud-tag"}}, wantErr: true},
+		{name: "tokens with shadow and cloudflare", auth: Auth{Mode: "shadow", CloudflareAccess: cf, Tokens: Tokens{Enabled: true}}, wantMode: "shadow", wantEnforceOn: "writes"},
+		{name: "tokens require non-off mode", auth: Auth{Mode: "off", CloudflareAccess: cf, Tokens: Tokens{Enabled: true}}, wantErr: true},
+		{name: "tokens require cloudflare", auth: Auth{Mode: "off", Tokens: Tokens{Enabled: true}}, wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

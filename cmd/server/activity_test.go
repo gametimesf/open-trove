@@ -154,7 +154,7 @@ func TestMyTroveReadFailureIsNotAnEmptyHistory(t *testing.T) {
 func TestMyTroveUploaderIsEscaped(t *testing.T) {
 	var html bytes.Buffer
 	owner := `<script>alert("owner")</script>`
-	err := myTroveTemplate.Execute(&html, &storage.UserManifest{Views: []storage.ActivityRecord{{Slug: "doc", Filename: "doc", OwnerEmail: owner}}})
+	err := myTroveTemplate.Execute(&html, myTroveView{UserManifest: &storage.UserManifest{Views: []storage.ActivityRecord{{Slug: "doc", Filename: "doc", OwnerEmail: owner}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
