@@ -89,6 +89,9 @@ func main() {
 	// routes can coexist. Internal browser assets are not tools.
 	mcp.ExcludeEndpoints([]string{
 		"/healthz",
+		"/favicon.svg",
+		"/favicon.png",
+		"/apple-touch-icon.png",
 		"/api/tokens",
 		"/api/tokens/*",
 		"/swagger/*",

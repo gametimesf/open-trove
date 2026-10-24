@@ -47,8 +47,9 @@ request. It is required for `POST`, `PUT`, `PATCH`, and `DELETE`.
 The server validates the address format but does not verify ownership. Put
 Trove behind your own authentication and authorization layer when access
 control matters. Verified identity sources (identity-proxy JWTs and personal
-access tokens) are configured under `auth`. With `auth.tokens.enabled`, signed-in
-users create personal access tokens on My Trove and send them as
+access tokens) are configured under `auth`; see
+[`docs/authentication.md`](docs/authentication.md). With `auth.tokens.enabled`,
+signed-in users create personal access tokens on My Trove and send them as
 `Authorization: Bearer trv_...`.
 
 ```bash

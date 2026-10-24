@@ -736,6 +736,29 @@ func TestMCPArtifactDeleteNotExposed(t *testing.T) {
 	}
 }
 
+func TestMCPIconRoutesNotExposed(t *testing.T) {
+	sid := mcpInit(t)
+	resp := mcpCall(t, sid, 2, "tools/list", map[string]any{})
+
+	var result struct {
+		Tools []struct {
+			Name string `json:"name"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("decoding tools/list: %v", err)
+	}
+	if len(result.Tools) == 0 {
+		t.Fatal("expected MCP tools to be listed")
+	}
+	for _, tool := range result.Tools {
+		name := strings.ToLower(tool.Name)
+		if strings.Contains(name, "favicon") || strings.Contains(name, "apple") {
+			t.Errorf("browser icon route should not be exposed via MCP, found %q", tool.Name)
+		}
+	}
+}
+
 func TestMCPInvalidSession(t *testing.T) {
 	req := jsonrpcRequest{JSONRPC: "2.0", ID: 1, Method: "tools/list", Params: map[string]any{}}
 	body, _ := json.Marshal(req)
