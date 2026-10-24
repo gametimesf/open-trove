@@ -859,6 +859,11 @@ func (s *server) handleSiteAsset(c echo.Context) error {
 func (s *server) handleDelete(c echo.Context) error {
 	slug := c.Param("slug")
 	log.Printf("INFO  user_email=%q delete slug=%s", userEmail(c), slug)
+	// Internal objects (activity, manifests, prompts) and anything that isn't
+	// a valid artifact slug are not deletable through this route.
+	if isInternalSlug(slug) || validateSlug(slug) != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "not found"})
+	}
 
 	if err := s.store.Delete(c.Request().Context(), slug); err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
