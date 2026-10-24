@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.5.0](https://github.com/gametimesf/open-trove/compare/open-trove-v1.4.0...open-trove-v1.5.0) (2026-10-24)
+
+
+### Features
+
+* random T-cube favicon with PNG fallback ([#24](https://github.com/gametimesf/open-trove/issues/24)) ([d8b843a](https://github.com/gametimesf/open-trove/commit/d8b843a50467f28ef44f9afb454b1737a0c91c5b))
+
+
+### Bug Fixes
+
+* restore CI with pullable MinIO and patched Go dependencies ([#25](https://github.com/gametimesf/open-trove/issues/25)) ([38d6b74](https://github.com/gametimesf/open-trove/commit/38d6b74d1e3702592a068fb2e8acff57dce37148))
+
 ## [1.4.0](https://github.com/gametimesf/open-trove/compare/open-trove-v1.3.0...open-trove-v1.4.0) (2026-09-14)
 
 
