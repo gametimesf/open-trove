@@ -161,7 +161,7 @@ func TestUserIdentityScriptRoute(t *testing.T) {
 
 // mustOffResolver returns the default asserted-only resolver.
 func mustOffResolver() *auth.Resolver {
-	r, err := auth.NewResolver(auth.ModeOff, auth.EnforceWrites, nil)
+	r, err := auth.NewResolver(auth.ModeOff, auth.EnforceWrites, auth.Sources{})
 	if err != nil {
 		panic(err)
 	}
@@ -201,7 +201,7 @@ func TestRequestIdentityMiddlewareModes(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resolver, err := auth.NewResolver(tt.mode, auth.EnforceWrites, proxy)
+			resolver, err := auth.NewResolver(tt.mode, auth.EnforceWrites, auth.Sources{Proxy: proxy})
 			if err != nil {
 				t.Fatalf("NewResolver: %v", err)
 			}
@@ -234,6 +234,50 @@ func TestRequestIdentityMiddlewareModes(t *testing.T) {
 			}
 			if gotHeader != tt.wantEmail {
 				t.Errorf("canonical header = %q, want %q", gotHeader, tt.wantEmail)
+			}
+		})
+	}
+}
+
+func TestUserIdentityJSVerifiedEmail(t *testing.T) {
+	tests := []struct {
+		name         string
+		jwt          string
+		wantInjected string
+	}{
+		{name: "verified browser gets its email", jwt: "good-jwt", wantInjected: `window.__troveVerifiedEmail = "verified@example.com";`},
+		{name: "unverified browser keeps the prompt", wantInjected: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolver, err := auth.NewResolver(auth.ModeShadow, auth.EnforceWrites, auth.Sources{Proxy: fakeProxy{token: "good-jwt", email: "verified@example.com"}})
+			if err != nil {
+				t.Fatalf("NewResolver: %v", err)
+			}
+			srv, _ := newTestServer()
+			srv.identity = resolver
+			e := echo.New()
+			registerRoutes(e, srv)
+
+			req := httptest.NewRequest(http.MethodGet, "/identity.js", nil)
+			if tt.jwt != "" {
+				req.Header.Set(auth.CloudflareAccessHeader, tt.jwt)
+			}
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d", rec.Code)
+			}
+			if cc := rec.Header().Get("Cache-Control"); cc != "private, no-store" {
+				t.Errorf("Cache-Control = %q, want private, no-store", cc)
+			}
+			body := rec.Body.String()
+			if tt.wantInjected != "" && !strings.HasPrefix(body, tt.wantInjected) {
+				t.Errorf("script does not start with %q", tt.wantInjected)
+			}
+			if tt.wantInjected == "" && strings.Contains(body, "window.__troveVerifiedEmail =") {
+				t.Error("unverified request received an injected email")
 			}
 		})
 	}

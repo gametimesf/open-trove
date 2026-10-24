@@ -893,7 +893,7 @@ func TestHandleMineSortsViewsByMostRecentlyViewed(t *testing.T) {
 	}
 
 	var page bytes.Buffer
-	if err := myTroveTemplate.Execute(&page, manifest); err != nil {
+	if err := myTroveTemplate.Execute(&page, myTroveView{UserManifest: manifest}); err != nil {
 		t.Fatalf("rendering My Trove: %v", err)
 	}
 

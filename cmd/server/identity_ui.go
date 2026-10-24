@@ -1,8 +1,11 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 
+	"github.com/gametimesf/open-trove/auth"
 	"github.com/labstack/echo/v4"
 )
 
@@ -13,6 +16,10 @@ const userIdentityJS = `(() => {
   const COOKIE_NAME = 'trove_user_email';
   const STORAGE_PREFIX = 'trove.userEmail.';
   const MAX_LENGTH = 254;
+
+  // Set by the server when an identity proxy has verified this browser. When
+  // present it is the only email used, and the prompt is never shown.
+  const VERIFIED_EMAIL = normalizeEmail(window.__troveVerifiedEmail || '');
 
   let promptPromise = null;
   let promptResolve = null;
@@ -53,6 +60,10 @@ const userIdentityJS = `(() => {
   }
 
   function getEmail() {
+    if (VERIFIED_EMAIL) {
+      if (readCookie() !== VERIFIED_EMAIL) writeCookie(VERIFIED_EMAIL);
+      return VERIFIED_EMAIL;
+    }
     let email = '';
     try {
       email = normalizeEmail(window.localStorage.getItem(storageKey()));
@@ -120,6 +131,13 @@ const userIdentityJS = `(() => {
     chip.id = 'trove-user-email-chip';
     chip.type = 'button';
     chip.className = 'trove-user-email-chip';
+    if (VERIFIED_EMAIL) {
+      chip.textContent = VERIFIED_EMAIL;
+      chip.title = 'Signed in as ' + VERIFIED_EMAIL;
+      chip.style.cursor = 'default';
+      document.body.appendChild(chip);
+      return;
+    }
     chip.addEventListener('click', () => showPrompt({ force: true, reloadOnSave: true }));
     document.body.appendChild(chip);
 
@@ -179,6 +197,7 @@ const userIdentityJS = `(() => {
   }
 
   function showPrompt(options) {
+    if (VERIFIED_EMAIL) return Promise.resolve(VERIFIED_EMAIL);
     injectUI();
     const current = getEmail();
     if (current && !(options && options.force)) return Promise.resolve(current);
@@ -250,6 +269,19 @@ const userIdentityJS = `(() => {
   });
 })();`
 
+// handleUserIdentityJS serves the browser identity script. When an identity
+// proxy verified this request, the script is told the verified email so it
+// uses that instead of prompting; the response then varies per user and must
+// not be shared by caches.
 func handleUserIdentityJS(c echo.Context) error {
-	return c.Blob(http.StatusOK, "application/javascript; charset=utf-8", []byte(userIdentityJS))
+	c.Response().Header().Set(echo.HeaderCacheControl, "private, no-store")
+	script := userIdentityJS
+	if p := verifiedPrincipal(c); p.Source == auth.SourceProxyJWT && p.Email != "" {
+		encoded, err := json.Marshal(p.Email) // escapes <, > and & for safe embedding
+		if err != nil {
+			return fmt.Errorf("encoding verified email: %w", err)
+		}
+		script = "window.__troveVerifiedEmail = " + string(encoded) + ";\n" + userIdentityJS
+	}
+	return c.Blob(http.StatusOK, "application/javascript; charset=utf-8", []byte(script))
 }

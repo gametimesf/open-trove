@@ -496,6 +496,16 @@ var myTroveTemplate = template.Must(template.New("mytrove").Funcs(template.FuncM
   .item-left a:hover { text-decoration: underline; }
   .item-left .meta { font-size: 12px; color: #999; margin-top: 2px; }
   .item-right { font-size: 12px; color: #aaa; white-space: nowrap; margin-left: 12px; }
+  .tokens { margin-top: 24px; }
+  .tokens p { font-size: 13px; color: #777; margin-bottom: 12px; }
+  .tokens form { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .tokens input, .tokens select { font-size: 13px; padding: 6px 8px; border: 1px solid #ddd; border-radius: 6px; }
+  .tokens input { flex: 1; min-width: 180px; }
+  .tokens button { font-size: 13px; padding: 6px 12px; border: none; border-radius: 6px; background: #4a90d9; color: #fff; cursor: pointer; }
+  .tokens button.revoke { background: #eee; color: #c0392b; }
+  .token-secret { display: none; background: #fffbe6; border: 1px solid #f0e0a0; border-radius: 8px; padding: 10px; margin-bottom: 12px; font-size: 13px; }
+  .token-secret code { display: block; word-break: break-all; margin: 6px 0; font-size: 12px; }
+  .token-error { color: #c0392b; font-size: 13px; min-height: 16px; }
 </style>
 </head>
 <body>
@@ -540,10 +550,131 @@ var myTroveTemplate = template.Must(template.New("mytrove").Funcs(template.FuncM
       {{end}}
     </div>
   </div>
+  {{if .TokensEnabled}}
+  <div class="column tokens">
+    <h2>API tokens</h2>
+    {{if .VerifiedEmail}}
+    <p>Personal access tokens let scripts and MCP clients act as {{.VerifiedEmail}}. Send one as <code>Authorization: Bearer &lt;token&gt;</code>.</p>
+    <form id="token-form">
+      <input id="token-name" maxlength="64" placeholder="Token name, e.g. laptop CLI" required>
+      <select id="token-days">
+        <option value="30">30 days</option>
+        <option value="90" selected>90 days</option>
+        <option value="365">1 year</option>
+      </select>
+      <button type="submit">Create token</button>
+    </form>
+    <div class="token-secret" id="token-secret">
+      Copy this token now. It won't be shown again.
+      <code id="token-value"></code>
+    </div>
+    <div class="token-error" id="token-error"></div>
+    <div id="token-list"></div>
+    {{else}}
+    <p>Sign in through your organization's identity provider to create tokens.</p>
+    {{end}}
+  </div>
+  {{end}}
 </div>
 <script src="/identity.js"></script>
+{{if and .TokensEnabled .VerifiedEmail}}
+<script>
+(() => {
+  const list = document.getElementById('token-list');
+  const error = document.getElementById('token-error');
+
+  function day(value) {
+    return value ? new Date(value).toLocaleDateString() : 'never';
+  }
+
+  async function request(method, path, body) {
+    const res = await fetch(path, {
+      method,
+      headers: body ? { 'Content-Type': 'application/json' } : {},
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = res.status === 204 ? null : await res.json().catch(() => null);
+    if (!res.ok) throw new Error((data && data.error) || ('request failed: ' + res.status));
+    return data;
+  }
+
+  function render(tokens) {
+    list.replaceChildren();
+    if (!tokens.length) {
+      const empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.textContent = 'No tokens yet';
+      list.append(empty);
+      return;
+    }
+    for (const token of tokens) {
+      const row = document.createElement('div');
+      row.className = 'item';
+      const left = document.createElement('div');
+      left.className = 'item-left';
+      const name = document.createElement('div');
+      name.textContent = token.name;
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = 'Expires ' + day(token.expires_at) + ' · last used ' + day(token.last_used_at);
+      left.append(name, meta);
+      const revoke = document.createElement('button');
+      revoke.className = 'revoke';
+      revoke.type = 'button';
+      revoke.textContent = 'Revoke';
+      revoke.addEventListener('click', async () => {
+        error.textContent = '';
+        try {
+          await request('DELETE', '/api/tokens/' + encodeURIComponent(token.id));
+          await load();
+        } catch (err) {
+          error.textContent = err.message;
+        }
+      });
+      row.append(left, revoke);
+      list.append(row);
+    }
+  }
+
+  async function load() {
+    try {
+      render((await request('GET', '/api/tokens')).tokens);
+    } catch (err) {
+      error.textContent = err.message;
+    }
+  }
+
+  document.getElementById('token-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    error.textContent = '';
+    try {
+      const created = await request('POST', '/api/tokens', {
+        name: document.getElementById('token-name').value,
+        expires_in_days: Number(document.getElementById('token-days').value),
+      });
+      document.getElementById('token-value').textContent = created.token;
+      document.getElementById('token-secret').style.display = 'block';
+      document.getElementById('token-name').value = '';
+      await load();
+    } catch (err) {
+      error.textContent = err.message;
+    }
+  });
+
+  load();
+})();
+</script>
+{{end}}
 </body>
 </html>`))
+
+// myTroveView is the My Trove page model: the browser's activity manifest
+// plus the token section state.
+type myTroveView struct {
+	*storage.UserManifest
+	TokensEnabled bool
+	VerifiedEmail string
+}
 
 func recentFirst(records []storage.ActivityRecord) []storage.ActivityRecord {
 	out := append([]storage.ActivityRecord(nil), records...)

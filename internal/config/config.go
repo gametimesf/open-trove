@@ -33,6 +33,12 @@ type Auth struct {
 	Mode             string           `yaml:"mode"`       // off (default), shadow, enforce
 	EnforceOn        string           `yaml:"enforce_on"` // writes (default; "all" is not supported yet)
 	CloudflareAccess CloudflareAccess `yaml:"cloudflare_access"`
+	Tokens           Tokens           `yaml:"tokens"`
+}
+
+// Tokens enables personal access tokens for API and MCP clients.
+type Tokens struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 // CloudflareAccess identifies the Access application whose signed JWTs Trove
@@ -290,6 +296,10 @@ func (a *Auth) validate() error {
 	}
 	if a.Mode != "off" && !cf.Configured() {
 		return fmt.Errorf("config: auth.mode %s requires a verified credential source", a.Mode)
+	}
+	// Tokens are minted only from an identity-proxy session, so they need one.
+	if a.Tokens.Enabled && (a.Mode == "off" || !cf.Configured()) {
+		return fmt.Errorf("config: auth.tokens requires auth.mode shadow or enforce with cloudflare_access")
 	}
 	return nil
 }

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/gametimesf/open-trove/auth"
 	"github.com/gametimesf/open-trove/comments"
 	"github.com/gametimesf/open-trove/internal/config"
 )
@@ -20,6 +21,7 @@ var (
 // Store is the interface that storage backends must implement.
 type Store interface {
 	comments.Repository
+	auth.TokenRepository
 
 	Put(ctx context.Context, slug string, body io.Reader, opts PutOptions) error
 	Get(ctx context.Context, slug string, rangeHeader string) (io.ReadCloser, *FileMetadata, error)
