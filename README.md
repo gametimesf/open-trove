@@ -46,7 +46,8 @@ request. It is required for `POST`, `PUT`, `PATCH`, and `DELETE`.
 
 The server validates the address format but does not verify ownership. Put
 Trove behind your own authentication and authorization layer when access
-control matters.
+control matters. Verified identity (identity-proxy JWTs and personal access
+tokens) is proposed in [`docs/authentication.md`](docs/authentication.md).
 
 ```bash
 export TROVE_BASE_URL=http://localhost:8080
