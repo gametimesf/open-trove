@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.6.0](https://github.com/gametimesf/open-trove/compare/open-trove-v1.5.0...open-trove-v1.6.0) (2026-10-24)
+
+
+### Features
+
+* personal access tokens for API and MCP clients ([#31](https://github.com/gametimesf/open-trove/issues/31)) ([531c844](https://github.com/gametimesf/open-trove/commit/531c844f574c6467e6544895026915e633cee8ac))
+* verify identity-proxy JWTs with off/shadow/enforce modes ([#29](https://github.com/gametimesf/open-trove/issues/29)) ([737a10d](https://github.com/gametimesf/open-trove/commit/737a10dce3db0a556bd70585889f69e6d6c01c49))
+
+
+### Bug Fixes
+
+* exclude browser icon routes from MCP tools ([#30](https://github.com/gametimesf/open-trove/issues/30)) ([02b2d9c](https://github.com/gametimesf/open-trove/commit/02b2d9c16a6afc521a5910f3e2202c33dfbb4547))
+* refuse to delete internal objects through the delete route ([#33](https://github.com/gametimesf/open-trove/issues/33)) ([a32668d](https://github.com/gametimesf/open-trove/commit/a32668d31ce9dff335aa41608234bf859f4fb762))
+
 ## [1.5.0](https://github.com/gametimesf/open-trove/compare/open-trove-v1.4.0...open-trove-v1.5.0) (2026-10-24)
 
 
