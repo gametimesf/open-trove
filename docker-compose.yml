@@ -1,6 +1,6 @@
 services:
   minio:
-    image: quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    image: cgr.dev/chainguard/minio@sha256:ae73835075ee168f1745cc28d4cf5bbd6a5973e5609b2b2593280aaa495ea113 # MinIO no longer publishes public images
     command: server /data --console-address ":9001"
     ports:
       - "9000:9000"
@@ -10,7 +10,7 @@ services:
       MINIO_ROOT_PASSWORD: minioadmin
 
   minio-setup:
-    image: quay.io/minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    image: cgr.dev/chainguard/minio-client@sha256:7e046421a370426ea57eec3f077653aa997f17c689145a48225c140ce7c7d5bd # latest-dev: includes the shell used below
     depends_on:
       - minio
     entrypoint: >
