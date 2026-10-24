@@ -356,3 +356,59 @@ auth:
 		t.Errorf("auth = %+v, want %+v", cfg.Auth, want)
 	}
 }
+
+func TestValidateSlack(t *testing.T) {
+	const bot, app = "xoxb-test-placeholder", "xapp-test-placeholder"
+	tests := []struct {
+		name    string
+		slack   Slack
+		wantErr bool
+	}{
+		{name: "disabled needs nothing", slack: Slack{Notifications: true, Unfurls: true}},
+		{name: "enabled with both tokens", slack: Slack{Enabled: true, Notifications: true, Unfurls: true, BotToken: bot, AppToken: app}},
+		{name: "notifications only need the bot token", slack: Slack{Enabled: true, Notifications: true, BotToken: bot}},
+		{name: "missing bot token", slack: Slack{Enabled: true, Notifications: true, Unfurls: true, AppToken: app}, wantErr: true},
+		{name: "unfurls need the app token", slack: Slack{Enabled: true, Unfurls: true, BotToken: bot}, wantErr: true},
+		{name: "tokens swapped", slack: Slack{Enabled: true, Notifications: true, Unfurls: true, BotToken: app, AppToken: bot}, wantErr: true},
+		{name: "nothing turned on", slack: Slack{Enabled: true, BotToken: bot}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{
+				Port:    "8080",
+				BaseURL: "https://trove.example.com",
+				Uploads: Uploads{MaxBytes: 1, MaxSiteFiles: 1, MaxSiteBytes: 1, MaxSiteFileBytes: 1},
+				Slack:   tt.slack,
+			}
+			if err := cfg.Validate(); (err != nil) != tt.wantErr {
+				t.Fatalf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestLoadSlackTokensFromEnvironmentOnly(t *testing.T) {
+	dir := t.TempDir()
+	writeYAML(t, dir, "trove.yaml", `
+slack:
+  enabled: true
+  unfurls: false
+`)
+	origDir := chdir(t, dir)
+	defer os.Chdir(origDir)
+	t.Setenv("SLACK_BOT_TOKEN", "xoxb-test-placeholder")
+	t.Setenv("SLACK_APP_TOKEN", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Slack.Enabled || !cfg.Slack.Notifications || cfg.Slack.Unfurls || cfg.Slack.BotToken != "xoxb-test-placeholder" {
+		t.Fatalf("slack = %+v", cfg.Slack)
+	}
+
+	writeYAML(t, dir, "trove.yaml", "slack:\n  bot_token: xoxb-in-yaml\n")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected tokens in YAML to be rejected as unknown fields")
+	}
+}

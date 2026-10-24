@@ -1,7 +1,16 @@
 # Slack integration design
 
-Status: in progress. The notification domain ships first; the Slack adapter
-follows. Both are off unless configured.
+Status: implemented, off by default. Enable with:
+
+```yaml
+slack:
+  enabled: true
+  notifications: true # comment DMs (default true)
+  unfurls: true       # link previews over Socket Mode (default true)
+```
+
+and `SLACK_BOT_TOKEN` / `SLACK_APP_TOKEN` in the environment. Create the Slack
+app from `docs/slack-app-manifest.yaml`.
 
 ## Goals
 
@@ -67,7 +76,7 @@ Operators should enable notifications together with, or after, enforcement.
 - Tokens come from the environment, never YAML: `SLACK_BOT_TOKEN` (bot user
   OAuth token) and `SLACK_APP_TOKEN` (app-level token with
   `connections:write`).
-- `docs/slack-app-manifest.yaml` (added with the adapter) is the auditable scope set.
+- `docs/slack-app-manifest.yaml` is the auditable scope set.
 
 ## Link previews
 
@@ -76,6 +85,9 @@ Operators should enable notifications together with, or after, enforcement.
 - Preview: title, type, uploader, open comment count. No file content.
 - Skip previews in channels shared with other organizations (Slack Connect). If
   the channel can't be checked, skip — fail closed.
+- Only links in posted messages are previewed. Links still in the message
+  composer need an unfurl ID that the Slack library's event type doesn't expose
+  yet, so they're skipped.
 
 ## Data handling
 

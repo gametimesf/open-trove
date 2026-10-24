@@ -1,0 +1,64 @@
+# Slack app manifest for Trove (docs/slack.md).
+#
+# Create the app at https://api.slack.com/apps → Create New App → From a
+# manifest, then replace trove.example.com with your deployment's host.
+# Checked in so the scope set stays auditable; adding a scope requires the app
+# to be re-approved by a workspace admin.
+#
+# Socket Mode is the only ingress: there is no Events API URL and no signing
+# secret. Trove reads SLACK_BOT_TOKEN (Bot User OAuth Token, xoxb-) and
+# SLACK_APP_TOKEN (App-Level Token with connections:write, xapp-) from the
+# environment.
+#
+# Scopes:
+#   chat:write          send notification DMs
+#   users:read,
+#   users:read.email    find the Slack user for a Trove email
+#   links:read,
+#   links:write         receive link_shared and post previews
+#   channels:read, groups:read, im:read, mpim:read
+#                       check whether a channel is shared with another
+#                       organization before previewing (fails closed)
+
+_metadata:
+  major_version: 1
+  minor_version: 1
+
+display_information:
+  name: Trove
+  description: Comment notifications and link previews for Trove.
+  background_color: "#1f2937"
+
+features:
+  bot_user:
+    display_name: Trove
+    always_online: true
+  app_home:
+    home_tab_enabled: false
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: true
+  unfurl_domains:
+    - trove.example.com
+
+oauth_config:
+  scopes:
+    bot:
+      - chat:write
+      - users:read
+      - users:read.email
+      - links:read
+      - links:write
+      - channels:read
+      - groups:read
+      - im:read
+      - mpim:read
+
+settings:
+  socket_mode_enabled: true
+  event_subscriptions:
+    bot_events:
+      - link_shared
+  interactivity:
+    is_enabled: false
+  org_deploy_enabled: false
+  token_rotation_enabled: false

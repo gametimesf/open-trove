@@ -136,6 +136,13 @@ auth:
   tokens:
     enabled: false # personal access tokens; needs shadow/enforce + cloudflare_access
 
+# Optional: Slack app (comment DMs, link previews). See docs/slack.md.
+# Tokens come only from SLACK_BOT_TOKEN and SLACK_APP_TOKEN.
+slack:
+  enabled: false
+  notifications: true
+  unfurls: true
+
 intake:
   enabled: false
   provider: "anthropic"
