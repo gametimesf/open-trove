@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gametimesf/open-trove/auth"
 	"github.com/gametimesf/open-trove/comments"
 	"github.com/gametimesf/open-trove/intake"
 	"github.com/gametimesf/open-trove/internal/favicon"
@@ -35,6 +36,8 @@ type server struct {
 	intakeFail      intake.FailMode  // closed (default) or open
 	// intn returns a random int in [0, n); injected so favicon selection is testable.
 	intn func(n int) int
+	// identity resolves each request's principal; see docs/authentication.md.
+	identity *auth.Resolver
 }
 
 type shareURLRule struct {

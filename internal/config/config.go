@@ -25,6 +25,26 @@ type Config struct {
 	Uploads         Uploads        `yaml:"uploads"`
 	ShareURLRules   []ShareURLRule `yaml:"share_url_rules"`
 	ContentReview   ContentReview  `yaml:"content_review"`
+	Auth            Auth           `yaml:"auth"`
+}
+
+// Auth configures verified identity. See docs/authentication.md.
+type Auth struct {
+	Mode             string           `yaml:"mode"`       // off (default), shadow, enforce
+	EnforceOn        string           `yaml:"enforce_on"` // writes (default; "all" is not supported yet)
+	CloudflareAccess CloudflareAccess `yaml:"cloudflare_access"`
+}
+
+// CloudflareAccess identifies the Access application whose signed JWTs Trove
+// verifies. Neither value is secret.
+type CloudflareAccess struct {
+	TeamDomain string `yaml:"team_domain"` // e.g. example.cloudflareaccess.com
+	Audience   string `yaml:"audience"`    // application audience (AUD) tag
+}
+
+// Configured reports whether Cloudflare Access verification is set up.
+func (c CloudflareAccess) Configured() bool {
+	return c.TeamDomain != "" || c.Audience != ""
 }
 
 // Uploads bounds request and ZIP expansion costs. All byte values are literal
@@ -105,6 +125,10 @@ func Load() (*Config, error) {
 		},
 		ContentReview: ContentReview{
 			ContactName: "the site administrator",
+		},
+		Auth: Auth{
+			Mode:      "off",
+			EnforceOn: "writes",
 		},
 	}
 
@@ -232,6 +256,40 @@ func (c *Config) Validate() error {
 			}
 			rule.PathPrefix = strings.TrimSuffix(path.Clean(rule.PathPrefix), "/")
 		}
+	}
+	return c.Auth.validate()
+}
+
+func (a *Auth) validate() error {
+	if a.Mode == "" {
+		a.Mode = "off"
+	}
+	if a.EnforceOn == "" {
+		a.EnforceOn = "writes"
+	}
+	switch a.Mode {
+	case "off", "shadow", "enforce":
+	default:
+		return fmt.Errorf("config: auth.mode must be off, shadow, or enforce")
+	}
+	// "all" would also gate health checks and public assets; it needs a
+	// public-route design first (docs/authentication.md).
+	if a.EnforceOn != "writes" {
+		return fmt.Errorf("config: auth.enforce_on must be writes")
+	}
+	cf := &a.CloudflareAccess
+	cf.TeamDomain = strings.TrimSpace(cf.TeamDomain)
+	cf.Audience = strings.TrimSpace(cf.Audience)
+	if cf.Configured() {
+		if cf.TeamDomain == "" || cf.Audience == "" {
+			return fmt.Errorf("config: auth.cloudflare_access requires team_domain and audience")
+		}
+		if strings.ContainsAny(cf.TeamDomain, "/:") || !strings.Contains(cf.TeamDomain, ".") {
+			return fmt.Errorf("config: auth.cloudflare_access.team_domain must be a bare host name")
+		}
+	}
+	if a.Mode != "off" && !cf.Configured() {
+		return fmt.Errorf("config: auth.mode %s requires a verified credential source", a.Mode)
 	}
 	return nil
 }

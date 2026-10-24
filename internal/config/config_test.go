@@ -287,3 +287,69 @@ func chdir(t *testing.T, dir string) string {
 	}
 	return orig
 }
+
+func TestValidateAuth(t *testing.T) {
+	cf := CloudflareAccess{TeamDomain: "team.example.com", Audience: "aud-tag"}
+	tests := []struct {
+		name          string
+		auth          Auth
+		wantErr       bool
+		wantMode      string
+		wantEnforceOn string
+	}{
+		{name: "empty defaults to off and writes", auth: Auth{}, wantMode: "off", wantEnforceOn: "writes"},
+		{name: "shadow with cloudflare", auth: Auth{Mode: "shadow", CloudflareAccess: cf}, wantMode: "shadow", wantEnforceOn: "writes"},
+		{name: "enforce all is not supported yet", auth: Auth{Mode: "enforce", EnforceOn: "all", CloudflareAccess: cf}, wantErr: true},
+		{name: "enforce writes with cloudflare", auth: Auth{Mode: "enforce", CloudflareAccess: cf}, wantMode: "enforce", wantEnforceOn: "writes"},
+		{name: "off may preconfigure cloudflare", auth: Auth{Mode: "off", CloudflareAccess: cf}, wantMode: "off", wantEnforceOn: "writes"},
+		{name: "shadow without source", auth: Auth{Mode: "shadow"}, wantErr: true},
+		{name: "enforce without source", auth: Auth{Mode: "enforce"}, wantErr: true},
+		{name: "unknown mode", auth: Auth{Mode: "strict", CloudflareAccess: cf}, wantErr: true},
+		{name: "unknown scope", auth: Auth{Mode: "enforce", EnforceOn: "reads", CloudflareAccess: cf}, wantErr: true},
+		{name: "audience without team", auth: Auth{CloudflareAccess: CloudflareAccess{Audience: "aud-tag"}}, wantErr: true},
+		{name: "team without audience", auth: Auth{CloudflareAccess: CloudflareAccess{TeamDomain: "team.example.com"}}, wantErr: true},
+		{name: "team with scheme", auth: Auth{CloudflareAccess: CloudflareAccess{TeamDomain: "https://team.example.com", Audience: "aud-tag"}}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{
+				Port:    "8080",
+				BaseURL: "https://trove.example.com",
+				Uploads: Uploads{MaxBytes: 1, MaxSiteFiles: 1, MaxSiteBytes: 1, MaxSiteFileBytes: 1},
+				Auth:    tt.auth,
+			}
+			err := cfg.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err != nil {
+				return
+			}
+			if cfg.Auth.Mode != tt.wantMode || cfg.Auth.EnforceOn != tt.wantEnforceOn {
+				t.Errorf("auth = %+v, want mode %q enforce_on %q", cfg.Auth, tt.wantMode, tt.wantEnforceOn)
+			}
+		})
+	}
+}
+
+func TestLoadAuthFromYAML(t *testing.T) {
+	dir := t.TempDir()
+	writeYAML(t, dir, "trove.yaml", `
+auth:
+  mode: shadow
+  cloudflare_access:
+    team_domain: team.example.com
+    audience: aud-tag
+`)
+	origDir := chdir(t, dir)
+	defer os.Chdir(origDir)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	want := Auth{Mode: "shadow", EnforceOn: "writes", CloudflareAccess: CloudflareAccess{TeamDomain: "team.example.com", Audience: "aud-tag"}}
+	if cfg.Auth != want {
+		t.Errorf("auth = %+v, want %+v", cfg.Auth, want)
+	}
+}
