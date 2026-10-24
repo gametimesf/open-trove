@@ -191,7 +191,8 @@ func TestRequestIdentityMiddlewareModes(t *testing.T) {
 	}{
 		{name: "shadow keeps asserted email on write", mode: auth.ModeShadow, method: http.MethodPost, jwt: "good-jwt", asserted: "asserted@example.com", wantStatus: http.StatusOK, wantEmail: "asserted@example.com"},
 		{name: "shadow does not block invalid jwt", mode: auth.ModeShadow, method: http.MethodPost, jwt: "forged", asserted: "asserted@example.com", wantStatus: http.StatusOK, wantEmail: "asserted@example.com"},
-		{name: "shadow keeps 400 for write without email", mode: auth.ModeShadow, method: http.MethodPost, jwt: "good-jwt", wantStatus: http.StatusBadRequest},
+		{name: "shadow uses verified email when none is asserted", mode: auth.ModeShadow, method: http.MethodPost, jwt: "good-jwt", wantStatus: http.StatusOK, wantEmail: "verified@example.com"},
+		{name: "shadow keeps 400 for write without any identity", mode: auth.ModeShadow, method: http.MethodPost, wantStatus: http.StatusBadRequest},
 		{name: "enforce replaces asserted with verified", mode: auth.ModeEnforce, method: http.MethodPost, jwt: "good-jwt", asserted: "someone-else@example.com", wantStatus: http.StatusOK, wantEmail: "verified@example.com"},
 		{name: "enforce accepts verified write without asserted email", mode: auth.ModeEnforce, method: http.MethodPost, jwt: "good-jwt", wantStatus: http.StatusOK, wantEmail: "verified@example.com"},
 		{name: "enforce rejects asserted-only write", mode: auth.ModeEnforce, method: http.MethodPost, asserted: "asserted@example.com", wantStatus: http.StatusUnauthorized},
