@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"log"
+	"math/rand/v2"
 	"net/http"
 
 	mcpserver "github.com/BrunoKrugel/echo-mcp"
@@ -47,6 +48,7 @@ func main() {
 		baseURL:         cfg.BaseURL,
 		intake:          inspector,
 		intakeFail:      failMode,
+		intn:            rand.IntN,
 		uploads: uploadLimits{
 			maxBytes:         cfg.Uploads.MaxBytes,
 			maxSiteFiles:     cfg.Uploads.MaxSiteFiles,
@@ -99,6 +101,9 @@ func registerRoutes(e *echo.Echo, srv *server) {
 
 	// Public routes
 	e.GET("/healthz", healthHandler)
+	e.GET("/favicon.svg", srv.handleFavicon)
+	e.GET("/favicon.png", handleFaviconPNG)
+	e.GET("/apple-touch-icon.png", handleAppleTouchIcon)
 	e.GET("/identity.js", handleUserIdentityJS)
 	registerCommentAssets(e)
 	registerLLMsTxtRoute(e, srv.llmsTxtOverride, srv.llmsTxtAppend)

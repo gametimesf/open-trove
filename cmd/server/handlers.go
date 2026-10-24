@@ -16,6 +16,7 @@ import (
 
 	"github.com/gametimesf/open-trove/comments"
 	"github.com/gametimesf/open-trove/intake"
+	"github.com/gametimesf/open-trove/internal/favicon"
 	"github.com/gametimesf/open-trove/storage"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
@@ -32,6 +33,8 @@ type server struct {
 	uploads         uploadLimits
 	intake          intake.Inspector // intake.NoOp{} when feature disabled
 	intakeFail      intake.FailMode  // closed (default) or open
+	// intn returns a random int in [0, n); injected so favicon selection is testable.
+	intn func(n int) int
 }
 
 type shareURLRule struct {
@@ -246,6 +249,28 @@ func (s *server) handleAgentJSON(c echo.Context) error {
 			},
 		},
 	})
+}
+
+// handleFavicon serves a randomly rotated, randomly colored T-cube favicon. The response is
+// never cached, so each page load can show a different combination.
+func (s *server) handleFavicon(c echo.Context) error {
+	c.Response().Header().Set(echo.HeaderCacheControl, "no-store")
+	return c.Blob(http.StatusOK, "image/svg+xml", []byte(favicon.SVG(favicon.Random(s.intn))))
+}
+
+// staticIconMaxAge is how long browsers may cache the fixed PNG fallback icons.
+const staticIconMaxAge = "public, max-age=86400"
+
+// handleFaviconPNG serves the fixed 32px PNG fallback for browsers without SVG favicon support.
+func handleFaviconPNG(c echo.Context) error {
+	c.Response().Header().Set(echo.HeaderCacheControl, staticIconMaxAge)
+	return c.Blob(http.StatusOK, "image/png", favicon.PNG32)
+}
+
+// handleAppleTouchIcon serves the fixed 180px icon used for iOS home screens and Safari.
+func handleAppleTouchIcon(c echo.Context) error {
+	c.Response().Header().Set(echo.HeaderCacheControl, staticIconMaxAge)
+	return c.Blob(http.StatusOK, "image/png", favicon.AppleTouchIcon)
 }
 
 // handleIndex godoc

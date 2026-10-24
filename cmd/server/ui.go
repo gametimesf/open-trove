@@ -14,6 +14,9 @@ const uploadPageHTML = `<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon.png">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>trove — upload</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -153,6 +156,9 @@ var viewerTemplate = template.Must(template.New("viewer").Parse(`<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon.png">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>{{.Filename}} — trove</title>
 <meta property="og:title" content="{{.Filename}}">
 <meta property="og:description" content="{{.ContentType}}">
@@ -468,6 +474,9 @@ var myTroveTemplate = template.Must(template.New("mytrove").Funcs(template.FuncM
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon.png">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>My Trove</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -560,6 +569,9 @@ var siteViewerTemplate = template.Must(template.New("siteviewer").Parse(`<!DOCTY
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon.png">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>{{.Slug}} — trove</title>
 <link rel="stylesheet" href="/_trove/comments.css">
 <style>
@@ -648,6 +660,9 @@ var errorTemplate = template.Must(template.New("error").Parse(`<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon.png">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>{{.Code}} — trove</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
