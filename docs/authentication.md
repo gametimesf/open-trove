@@ -161,8 +161,8 @@ Plan:
 
 1. Contribute an `echo-mcp` change that runs tool requests with the incoming
    request's context and forwards a configured header allowlist
-   (`Authorization`, `Cf-Access-Jwt-Assertion`). Use a fork via `replace` until
-   it merges.
+   (`Authorization`, `Cf-Access-Jwt-Assertion`). Proposed upstream as
+   BrunoKrugel/echo-mcp#15; adopt the release that includes it.
 2. Forward only those headers. Tool arguments named like identity headers are
    ignored in `enforce` mode.
 
@@ -187,6 +187,28 @@ endpoint; it is out of scope for this phase.
 3. `echo-mcp` context and header forwarding.
 4. Operator enables `shadow`, observes, then `enforce` with `enforce_on: writes`.
 5. Revisit `enforce_on: all` and per-artifact authorization separately.
+
+## Preparing for sharing and access control
+
+Per-artifact access control (share with a person or a group, private
+artifacts) is the next design, not this one. This phase keeps it possible:
+
+- **Groups.** Identity proxies can put group membership in the signed token
+  (for example an Okta groups claim forwarded by Cloudflare Access). When
+  sharing lands, `Principal` gains `Groups []string`, read from a configured
+  claim. Tokens would snapshot nothing; group checks use the proxy claim at
+  request time, so membership changes apply without reissuing tokens.
+- **Trustworthy ownership.** Artifacts already record `owner_email`. Once
+  verification is enforced, new uploads should also record how the owner was
+  identified (`owner_source`), so access rules can treat legacy, asserted
+  ownership differently from verified ownership.
+- **One decision point.** Handlers already read identity through
+  `userEmail(c)` and `verifiedPrincipal(c)`. Authorization should be a service
+  that takes a principal and an artifact and returns allow or deny, called from
+  the same places, rather than checks spread across handlers.
+- **Default visibility.** Existing artifacts are visible to everyone who can
+  reach the deployment. That remains the default; private and shared are
+  opt-in per artifact, so no migration changes who can see existing files.
 
 ## Alternatives considered
 
