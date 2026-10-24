@@ -1398,6 +1398,37 @@ func TestHandleDelete(t *testing.T) {
 	}
 }
 
+func TestHandleDeleteRejectsInternalAndInvalidSlugs(t *testing.T) {
+	tests := []struct {
+		name string
+		slug string
+	}{
+		{name: "internal key", slug: "_prompt"},
+		{name: "uppercase is not a valid slug", slug: "Report"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv, store := newTestServer()
+			e := newTestEcho(srv)
+			if err := store.Put(t.Context(), tt.slug, strings.NewReader("keep"), storage.PutOptions{ContentType: "text/plain", Filename: "keep.txt"}); err != nil {
+				t.Fatalf("seeding %s: %v", tt.slug, err)
+			}
+
+			req := httptest.NewRequest(http.MethodDelete, "/delete/"+tt.slug, nil)
+			req.Header.Set(troveUserEmailHeader, "someone@example.com")
+			w := httptest.NewRecorder()
+			e.ServeHTTP(w, req)
+
+			if w.Code != http.StatusNotFound {
+				t.Errorf("expected 404, got %d", w.Code)
+			}
+			if _, err := store.Metadata(t.Context(), tt.slug); err != nil {
+				t.Errorf("%s was deleted: %v", tt.slug, err)
+			}
+		})
+	}
+}
+
 func TestHandleDeleteNotFound(t *testing.T) {
 	srv, _ := newTestServer()
 	e := echo.New()
