@@ -96,8 +96,9 @@ proxy's browser login:
 - Stored as a SHA-256 hash, keyed by hash, with owner email, name, creation
   time, expiry (default 90 days, maximum 1 year), and throttled last-used time.
   The plaintext is never stored or logged.
-- Users list and revoke only their own tokens. Revocation takes effect on the
-  next request.
+- Creating, listing and revoking require the same identity-proxy session, so a
+  leaked token can't mint more tokens or revoke its owner's others. Users only
+  see their own tokens. Revocation takes effect on the next request.
 - Storage lives behind the existing `storage.Store` contract, so S3 and the
   in-memory fake both work.
 
@@ -114,7 +115,7 @@ reads for logs and history.
 ```yaml
 auth:
   mode: off          # off | shadow | enforce
-  enforce_on: writes # writes | all (enforce only)
+  enforce_on: writes # only "writes" for now; see below
   cloudflare_access:
     team_domain: "example.cloudflareaccess.com"
     audience: "<application audience tag>"
@@ -125,11 +126,14 @@ auth:
 | Mode | Resolution | Blocking |
 |---|---|---|
 | `off` | Asserted email only. The current behavior and the default. | Writes without an email return 400, as today. |
-| `shadow` | All configured sources are evaluated and logged. Handlers still receive the asserted email when it is present, so behavior is unchanged. | Nothing new is blocked. |
-| `enforce` | Handlers receive the verified principal; out-of-scope requests without one keep asserted attribution. | Requests in `enforce_on` scope without a verified principal return 401. An invalid credential always returns 401. |
+| `shadow` | All configured sources are evaluated and logged. Handlers receive the asserted email when one is sent, and the verified email only when none is, so token-only clients can write. | Nothing new is blocked. |
+| `enforce` | Handlers receive the verified principal; out-of-scope requests without one keep asserted attribution. | Requests in `enforce_on` scope without a verified principal return 401. An invalid credential always returns 401. A credential that can't be checked because a dependency failed (for example the token store) returns 503. |
 
 Startup fails if `enforce` is set without at least one verified source
 configured, or if `cloudflare_access` is configured without both fields.
+
+`enforce_on: all` is not accepted yet. It would also gate `/healthz`, icons and
+other public routes, so it needs an explicit public-route list first.
 
 ### Shadow logging
 
