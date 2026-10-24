@@ -196,8 +196,10 @@ artifacts) is the next design, not this one. This phase keeps it possible:
 - **Groups.** Identity proxies can put group membership in the signed token
   (for example an Okta groups claim forwarded by Cloudflare Access). When
   sharing lands, `Principal` gains `Groups []string`, read from a configured
-  claim. Tokens would snapshot nothing; group checks use the proxy claim at
-  request time, so membership changes apply without reissuing tokens.
+  claim, so membership changes apply without redeploying Trove. Open question:
+  token-authenticated requests carry no proxy claim, so groups for token
+  callers need another source (a directory lookup, or groups captured at mint
+  time and refreshed).
 - **Trustworthy ownership.** Artifacts already record `owner_email`. Once
   verification is enforced, new uploads should also record how the owner was
   identified (`owner_source`), so access rules can treat legacy, asserted
