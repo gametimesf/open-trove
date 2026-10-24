@@ -1,12 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
-	"net/mail"
-	"strings"
 
+	"github.com/gametimesf/open-trove/auth"
+	"github.com/gametimesf/open-trove/internal/config"
 	"github.com/labstack/echo/v4"
 )
 
@@ -18,32 +19,48 @@ const (
 	userEmailSourceContextKey = "trove_user_email_source"
 )
 
-// requestIdentityMiddleware resolves audit-only user attribution on every
-// request. API and agent clients provide X-Trove-User-Email directly; browser
-// pages cache the same manually entered email in a host-scoped cookie and add
-// the header to fetch requests. The email is never used for authorization.
-func requestIdentityMiddleware() echo.MiddlewareFunc {
+// requestIdentityMiddleware resolves user identity on every request. Asserted
+// attribution comes from X-Trove-User-Email (API and agent clients) or the
+// browser's cached email cookie. Verified sources, such as an identity-proxy
+// JWT, are evaluated by the resolver according to its mode; see
+// docs/authentication.md.
+func requestIdentityMiddleware(resolver *auth.Resolver) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
-			email, source := resolveRequestUserEmail(c.Request())
-			if email != "" {
-				c.Set(userEmailContextKey, email)
-				c.Set(userEmailSourceContextKey, source)
+			req := c.Request()
+			asserted, assertedSource := resolveRequestUserEmail(req)
+			write := isWriteMethod(req.Method)
+			d := resolver.Resolve(req.Context(), auth.Credentials{
+				ProxyJWT:      req.Header.Get(auth.CloudflareAccessHeader),
+				AssertedEmail: asserted,
+			}, write)
 
-				// Give handlers and mounted integrations one canonical
-				// identity header regardless of its external source.
-				c.Request().Header.Set(troveUserEmailHeader, email)
+			source := assertedSource
+			if d.Principal.Verified {
+				source = string(d.Principal.Source)
+			}
+			log.Printf(
+				"INFO  request identity method=%s path=%q user_email=%q source=%s verified_email=%q mismatch=%t",
+				req.Method, req.URL.Path, d.Principal.Email, source, d.Verified.Email, d.Mismatch,
+			)
+			if d.VerifyErr != nil {
+				log.Printf("WARN  identity verification failed method=%s path=%q mode=%s reason=%s",
+					req.Method, req.URL.Path, resolver.Mode(), auth.Reason(d.VerifyErr))
+			}
+			if d.Deny != nil {
+				log.Printf("WARN  auth denied method=%s path=%q reason=%s", req.Method, req.URL.Path, auth.Reason(d.Deny))
+				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "authentication required"})
 			}
 
-			log.Printf(
-				"INFO  request identity method=%s path=%q user_email=%q source=%s",
-				c.Request().Method,
-				c.Request().URL.Path,
-				email,
-				source,
-			)
-
-			if isWriteMethod(c.Request().Method) && email == "" {
+			if d.Principal.Email != "" {
+				c.Set(userEmailContextKey, d.Principal.Email)
+				c.Set(userEmailSourceContextKey, source)
+				// Give handlers and mounted integrations one canonical identity
+				// header regardless of its source. A verified email replaces any
+				// asserted value the client sent.
+				req.Header.Set(troveUserEmailHeader, d.Principal.Email)
+			}
+			if write && d.Principal.Email == "" {
 				return c.JSON(http.StatusBadRequest, map[string]string{
 					"error": fmt.Sprintf(
 						"user email is required for write requests; send %s",
@@ -51,41 +68,41 @@ func requestIdentityMiddleware() echo.MiddlewareFunc {
 					),
 				})
 			}
-
 			return next(c)
 		}
 	}
 }
 
+// newIdentityResolver builds the request identity resolver from configuration.
+// Off mode with no verified source reproduces asserted-only attribution.
+func newIdentityResolver(ctx context.Context, cfg config.Auth) (*auth.Resolver, error) {
+	var proxy auth.ProxyVerifier
+	if cfg.CloudflareAccess.Configured() {
+		verifier, err := auth.NewCloudflareAccess(ctx, cfg.CloudflareAccess.TeamDomain, cfg.CloudflareAccess.Audience)
+		if err != nil {
+			return nil, fmt.Errorf("configuring cloudflare access: %w", err)
+		}
+		proxy = verifier
+	}
+	resolver, err := auth.NewResolver(auth.Mode(cfg.Mode), auth.EnforceOn(cfg.EnforceOn), proxy)
+	if err != nil {
+		return nil, fmt.Errorf("configuring identity resolver: %w", err)
+	}
+	return resolver, nil
+}
+
 func resolveRequestUserEmail(r *http.Request) (string, string) {
-	if email := normalizeEmail(r.Header.Get(troveUserEmailHeader)); email != "" {
+	if email := auth.NormalizeEmail(r.Header.Get(troveUserEmailHeader)); email != "" {
 		return email, "header"
 	}
 
 	if cookie, err := r.Cookie(troveUserEmailCookie); err == nil {
-		if email := normalizeEmail(cookie.Value); email != "" {
+		if email := auth.NormalizeEmail(cookie.Value); email != "" {
 			return email, "cookie"
 		}
 	}
 
 	return "", "missing"
-}
-
-func normalizeEmail(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" || len(value) > 254 {
-		return ""
-	}
-
-	address, err := mail.ParseAddress(value)
-	if err != nil || address.Address != value {
-		return ""
-	}
-	at := strings.LastIndexByte(value, '@')
-	if at <= 0 || at == len(value)-1 || !strings.Contains(value[at+1:], ".") {
-		return ""
-	}
-	return strings.ToLower(value)
 }
 
 func isWriteMethod(method string) bool {

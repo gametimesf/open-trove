@@ -32,6 +32,7 @@ func newTestServer() (*server, *fake.Store) {
 		intake:     intake.NoOp{},
 		intakeFail: intake.FailClosed,
 		intn:       func(int) int { return 0 },
+		identity:   mustOffResolver(),
 	}
 	return srv, store
 }

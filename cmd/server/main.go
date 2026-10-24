@@ -40,7 +40,14 @@ func main() {
 		log.Fatalf("initializing upload intake: %v", err)
 	}
 
+	identity, err := newIdentityResolver(ctx, cfg.Auth)
+	if err != nil {
+		log.Fatalf("initializing identity: %v", err)
+	}
+	log.Printf("identity mode=%s enforce_on=%s cloudflare_access=%t", cfg.Auth.Mode, cfg.Auth.EnforceOn, cfg.Auth.CloudflareAccess.Configured())
+
 	srv := &server{
+		identity:        identity,
 		llmsTxtOverride: cfg.LLMSTxtOverride,
 		llmsTxtAppend:   cfg.LLMSTxtAppend,
 		store:           store,
@@ -97,7 +104,7 @@ func main() {
 }
 
 func registerRoutes(e *echo.Echo, srv *server) {
-	e.Use(requestIdentityMiddleware())
+	e.Use(requestIdentityMiddleware(srv.identity))
 
 	// Public routes
 	e.GET("/healthz", healthHandler)

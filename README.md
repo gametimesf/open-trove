@@ -121,6 +121,15 @@ content_review:
   contact_name: "the security team"
   contact_email: "security@example.com"
 
+# Optional: verified identity. Defaults keep asserted-email attribution.
+# See docs/authentication.md before enabling shadow or enforce.
+auth:
+  mode: "off" # off | shadow | enforce
+  enforce_on: "writes" # writes | all
+  cloudflare_access:
+    team_domain: "" # e.g. example.cloudflareaccess.com
+    audience: "" # Access application AUD tag
+
 intake:
   enabled: false
   provider: "anthropic"

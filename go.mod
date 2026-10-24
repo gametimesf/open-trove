@@ -5,10 +5,12 @@ go 1.26.10
 require (
 	github.com/BrunoKrugel/echo-mcp v0.1.11
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
+	github.com/MicahParks/keyfunc/v3 v3.8.2
 	github.com/aws/aws-sdk-go-v2 v1.41.7
 	github.com/aws/aws-sdk-go-v2/config v1.32.9
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.97.3
 	github.com/aws/smithy-go v1.25.1
+	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/labstack/echo/v4 v4.15.1
 	github.com/swaggo/echo-swagger v1.5.2
@@ -18,6 +20,7 @@ require (
 
 require (
 	github.com/KyleBanks/depth v1.2.1 // indirect
+	github.com/MicahParks/jwkset v0.11.3 // indirect
 	github.com/PuerkitoBio/goquery v1.9.2 // indirect
 	github.com/andybalholm/cascadia v1.3.2 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.8 // indirect
@@ -69,6 +72,7 @@ require (
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
+	golang.org/x/time v0.15.0 // indirect
 	golang.org/x/tools v0.49.0 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )

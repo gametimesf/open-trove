@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/gametimesf/open-trove/auth"
 	"github.com/labstack/echo/v4"
 )
 
@@ -54,7 +57,7 @@ func TestResolveRequestUserEmailMissing(t *testing.T) {
 
 func TestRequestIdentityMiddlewareAllowsReadWithoutIdentity(t *testing.T) {
 	e := echo.New()
-	e.Use(requestIdentityMiddleware())
+	e.Use(requestIdentityMiddleware(mustOffResolver()))
 	e.GET("/", func(c echo.Context) error {
 		return c.String(http.StatusOK, "ok")
 	})
@@ -70,7 +73,7 @@ func TestRequestIdentityMiddlewareAllowsReadWithoutIdentity(t *testing.T) {
 
 func TestRequestIdentityMiddlewareRequiresIdentityForWrites(t *testing.T) {
 	e := echo.New()
-	e.Use(requestIdentityMiddleware())
+	e.Use(requestIdentityMiddleware(mustOffResolver()))
 	e.POST("/write", func(c echo.Context) error {
 		return c.NoContent(http.StatusNoContent)
 	})
@@ -89,7 +92,7 @@ func TestRequestIdentityMiddlewareRequiresIdentityForWrites(t *testing.T) {
 
 func TestRequestIdentityMiddlewareSetsCanonicalHeaderFromCookie(t *testing.T) {
 	e := echo.New()
-	e.Use(requestIdentityMiddleware())
+	e.Use(requestIdentityMiddleware(mustOffResolver()))
 	e.POST("/write", func(c echo.Context) error {
 		if got := c.Request().Header.Get(troveUserEmailHeader); got != "browser@example.com" {
 			t.Fatalf("expected canonical identity header, got %q", got)
@@ -120,8 +123,8 @@ func TestNormalizeEmailRejectsDisplayNamesAndInvalidValues(t *testing.T) {
 		"not-an-email",
 		"jeff@gametime",
 	} {
-		if got := normalizeEmail(value); got != "" {
-			t.Errorf("normalizeEmail(%q) = %q, want empty", value, got)
+		if got := auth.NormalizeEmail(value); got != "" {
+			t.Errorf("auth.NormalizeEmail(%q) = %q, want empty", value, got)
 		}
 	}
 }
@@ -153,5 +156,84 @@ func TestUserIdentityScriptRoute(t *testing.T) {
 	}
 	if got := rec.Header().Get(echo.HeaderContentType); !strings.Contains(got, "application/javascript") {
 		t.Fatalf("expected JavaScript content type, got %q", got)
+	}
+}
+
+// mustOffResolver returns the default asserted-only resolver.
+func mustOffResolver() *auth.Resolver {
+	r, err := auth.NewResolver(auth.ModeOff, auth.EnforceWrites, nil)
+	if err != nil {
+		panic(err)
+	}
+	return r
+}
+
+// fakeProxy accepts exactly one token for one email.
+type fakeProxy struct{ token, email string }
+
+func (f fakeProxy) Verify(_ context.Context, token string) (string, error) {
+	if token != f.token {
+		return "", errors.New("bad token")
+	}
+	return f.email, nil
+}
+
+func TestRequestIdentityMiddlewareModes(t *testing.T) {
+	proxy := fakeProxy{token: "good-jwt", email: "verified@example.com"}
+	tests := []struct {
+		name       string
+		mode       auth.Mode
+		method     string
+		jwt        string
+		asserted   string
+		wantStatus int
+		wantEmail  string
+	}{
+		{name: "shadow keeps asserted email on write", mode: auth.ModeShadow, method: http.MethodPost, jwt: "good-jwt", asserted: "asserted@example.com", wantStatus: http.StatusOK, wantEmail: "asserted@example.com"},
+		{name: "shadow does not block invalid jwt", mode: auth.ModeShadow, method: http.MethodPost, jwt: "forged", asserted: "asserted@example.com", wantStatus: http.StatusOK, wantEmail: "asserted@example.com"},
+		{name: "shadow keeps 400 for write without email", mode: auth.ModeShadow, method: http.MethodPost, jwt: "good-jwt", wantStatus: http.StatusBadRequest},
+		{name: "enforce replaces asserted with verified", mode: auth.ModeEnforce, method: http.MethodPost, jwt: "good-jwt", asserted: "someone-else@example.com", wantStatus: http.StatusOK, wantEmail: "verified@example.com"},
+		{name: "enforce accepts verified write without asserted email", mode: auth.ModeEnforce, method: http.MethodPost, jwt: "good-jwt", wantStatus: http.StatusOK, wantEmail: "verified@example.com"},
+		{name: "enforce rejects asserted-only write", mode: auth.ModeEnforce, method: http.MethodPost, asserted: "asserted@example.com", wantStatus: http.StatusUnauthorized},
+		{name: "enforce rejects forged jwt on read", mode: auth.ModeEnforce, method: http.MethodGet, jwt: "forged", wantStatus: http.StatusUnauthorized},
+		{name: "enforce allows anonymous read", mode: auth.ModeEnforce, method: http.MethodGet, wantStatus: http.StatusOK},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolver, err := auth.NewResolver(tt.mode, auth.EnforceWrites, proxy)
+			if err != nil {
+				t.Fatalf("NewResolver: %v", err)
+			}
+			e := echo.New()
+			e.Use(requestIdentityMiddleware(resolver))
+			var gotEmail, gotHeader string
+			handler := func(c echo.Context) error {
+				gotEmail = userEmail(c)
+				gotHeader = c.Request().Header.Get(troveUserEmailHeader)
+				return c.String(http.StatusOK, "ok")
+			}
+			e.GET("/", handler)
+			e.POST("/", handler)
+
+			req := httptest.NewRequest(tt.method, "/", nil)
+			if tt.jwt != "" {
+				req.Header.Set(auth.CloudflareAccessHeader, tt.jwt)
+			}
+			if tt.asserted != "" {
+				req.Header.Set(troveUserEmailHeader, tt.asserted)
+			}
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+			if gotEmail != tt.wantEmail {
+				t.Errorf("handler email = %q, want %q", gotEmail, tt.wantEmail)
+			}
+			if gotHeader != tt.wantEmail {
+				t.Errorf("canonical header = %q, want %q", gotHeader, tt.wantEmail)
+			}
+		})
 	}
 }
