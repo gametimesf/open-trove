@@ -246,3 +246,58 @@ func TestServiceCreateValidation(t *testing.T) {
 		})
 	}
 }
+
+type recordingObserver struct{ got []Activity }
+
+func (r *recordingObserver) CommentActivity(_ context.Context, a Activity) { r.got = append(r.got, a) }
+
+func TestServiceReportsActivityAfterSuccessfulWrites(t *testing.T) {
+	repo := &repositoryStub{}
+	observer := &recordingObserver{}
+	service := deterministicService(repo)
+	service.observer = observer
+	ctx := context.Background()
+
+	root, err := service.Create(ctx, "report", "author@example.com", "v1", CreateInput{Body: "Review"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Reply(ctx, "report", root.ID, "reviewer@example.com", "v1", ReplyInput{Body: "Done"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Resolve(ctx, "report", root.ID, "reviewer@example.com", ResolveInput{Resolved: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Resolve(ctx, "report", root.ID, "reviewer@example.com", ResolveInput{Resolved: true}); err != nil {
+		t.Fatal(err) // already resolved: no change, no activity
+	}
+	if _, err := service.Resolve(ctx, "report", root.ID, "author@example.com", ResolveInput{Resolved: false}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Edit(ctx, "report", root.ID, "author@example.com", EditInput{Body: "Review please"}); err != nil {
+		t.Fatal(err) // edits are not notified
+	}
+	repo.err = errors.New("storage down")
+	if _, err := service.Create(ctx, "report", "author@example.com", "v1", CreateInput{Body: "Lost"}); err == nil {
+		t.Fatal("expected storage error")
+	}
+
+	want := []struct {
+		kind  ActivityKind
+		actor string
+	}{
+		{ActivityThreadCreated, "author@example.com"},
+		{ActivityReplyCreated, "reviewer@example.com"},
+		{ActivityThreadResolved, "reviewer@example.com"},
+		{ActivityThreadReopened, "author@example.com"},
+	}
+	if len(observer.got) != len(want) {
+		t.Fatalf("activities = %+v, want %d", observer.got, len(want))
+	}
+	for i, w := range want {
+		got := observer.got[i]
+		if got.Kind != w.kind || got.ActorEmail != w.actor || got.Slug != "report" || got.Comment.ThreadID != root.ID {
+			t.Errorf("activity %d = %+v, want kind %s actor %s", i, got, w.kind, w.actor)
+		}
+	}
+}

@@ -131,18 +131,66 @@ type Repository interface {
 	DeleteComments(ctx context.Context, slug string) error
 }
 
+// ActivityKind identifies a comment change worth telling people about.
+type ActivityKind string
+
+// Activity kinds.
+const (
+	ActivityThreadCreated  ActivityKind = "thread_created"
+	ActivityReplyCreated   ActivityKind = "reply_created"
+	ActivityThreadResolved ActivityKind = "thread_resolved"
+	ActivityThreadReopened ActivityKind = "thread_reopened"
+)
+
+// Activity describes a comment change after it was persisted. Comment is the
+// new comment for created kinds and the thread root for resolution kinds.
+type Activity struct {
+	Kind       ActivityKind
+	Slug       string
+	ActorEmail string
+	Comment    Comment
+}
+
+// Observer receives activity after it is stored, for example to send
+// notifications. Implementations must return quickly and must not fail the
+// write; do slow work asynchronously.
+type Observer interface {
+	CommentActivity(ctx context.Context, activity Activity)
+}
+
 type Service struct {
 	repository Repository
+	observer   Observer
 	now        func() time.Time
 	newID      func() string
 }
 
-func NewService(repository Repository) *Service {
-	return &Service{
+// Option configures a Service.
+type Option func(*Service)
+
+// WithObserver reports successful thread creation, replies and resolution
+// changes to observer.
+func WithObserver(observer Observer) Option {
+	return func(s *Service) { s.observer = observer }
+}
+
+func NewService(repository Repository, opts ...Option) *Service {
+	s := &Service{
 		repository: repository,
 		now:        time.Now,
 		newID:      uuid.NewString,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
+}
+
+func (s *Service) emit(ctx context.Context, kind ActivityKind, actorEmail string, comment Comment) {
+	if s.observer == nil {
+		return
+	}
+	s.observer.CommentActivity(ctx, Activity{Kind: kind, Slug: comment.Slug, ActorEmail: actorEmail, Comment: comment})
 }
 
 func (s *Service) Create(ctx context.Context, slug, authorEmail, artifactVersion string, input CreateInput) (Comment, error) {
@@ -166,6 +214,7 @@ func (s *Service) Create(ctx context.Context, slug, authorEmail, artifactVersion
 	if err := s.repository.CreateComment(ctx, comment); err != nil {
 		return Comment{}, fmt.Errorf("creating comment: %w", err)
 	}
+	s.emit(ctx, ActivityThreadCreated, authorEmail, comment)
 	return comment, nil
 }
 
@@ -206,6 +255,7 @@ func (s *Service) Reply(ctx context.Context, slug, threadID, authorEmail, artifa
 	if err := s.repository.CreateComment(ctx, reply); err != nil {
 		return Comment{}, fmt.Errorf("creating reply: %w", err)
 	}
+	s.emit(ctx, ActivityReplyCreated, authorEmail, reply)
 	return reply, nil
 }
 
@@ -277,6 +327,11 @@ func (s *Service) Resolve(ctx context.Context, slug, threadID, actorEmail string
 	if err := s.repository.UpdateComment(ctx, root); err != nil {
 		return Comment{}, fmt.Errorf("updating thread resolution: %w", err)
 	}
+	kind := ActivityThreadReopened
+	if input.Resolved {
+		kind = ActivityThreadResolved
+	}
+	s.emit(ctx, kind, actorEmail, root)
 	return root, nil
 }
 
