@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.7.0](https://github.com/gametimesf/open-trove/compare/open-trove-v1.6.0...open-trove-v1.7.0) (2026-10-24)
+
+
+### Features
+
+* comment activity notifications domain ([#34](https://github.com/gametimesf/open-trove/issues/34)) ([00e4b4e](https://github.com/gametimesf/open-trove/commit/00e4b4eabc00b339fb5f86a79b737516cbb7ed4c))
+* Slack app for comment DMs and link previews ([#36](https://github.com/gametimesf/open-trove/issues/36)) ([ef6e241](https://github.com/gametimesf/open-trove/commit/ef6e2416cb1a1966098e91ffef329aaa5321387a))
+
 ## [1.6.0](https://github.com/gametimesf/open-trove/compare/open-trove-v1.5.0...open-trove-v1.6.0) (2026-10-24)
 
 
