@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.0](https://github.com/gametimesf/open-trove/compare/open-trove-v1.7.0...open-trove-v1.8.0) (2026-10-26)
+
+
+### Features
+
+* rich Slack link previews from artifact content ([#37](https://github.com/gametimesf/open-trove/issues/37)) ([fd8e4b3](https://github.com/gametimesf/open-trove/commit/fd8e4b319d2e130539c29ef8ee0d74effbd0a3de))
+
 ## [1.7.0](https://github.com/gametimesf/open-trove/compare/open-trove-v1.6.0...open-trove-v1.7.0) (2026-10-24)
 
 
