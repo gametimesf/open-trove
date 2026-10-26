@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -12,6 +13,8 @@ import (
 	"github.com/gametimesf/open-trove/comments"
 	"github.com/gametimesf/open-trove/internal/config"
 	"github.com/gametimesf/open-trove/notify"
+	"github.com/gametimesf/open-trove/preview"
+	"github.com/gametimesf/open-trove/slackapp"
 	"github.com/gametimesf/open-trove/storage"
 	"github.com/gametimesf/open-trove/storage/fake"
 	"github.com/labstack/echo/v4"
@@ -81,14 +84,30 @@ func TestCommentOverHTTPNotifiesOwner(t *testing.T) {
 func TestArtifactInfoPreview(t *testing.T) {
 	store := fake.NewStore()
 	ctx := t.Context()
-	if err := store.Put(ctx, "doc", strings.NewReader("x"), storage.PutOptions{ContentType: "text/plain", Filename: "doc.txt", OwnerEmail: "owner@example.com"}); err != nil {
+	put := func(slug, contentType, filename, body string) {
+		t.Helper()
+		if err := store.Put(ctx, slug, strings.NewReader(body), storage.PutOptions{ContentType: contentType, Filename: filename, OwnerEmail: "owner@example.com"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	put("doc", "text/markdown; charset=utf-8", "doc.md", "# Launch plan\n\nShip pricing and inventory together.\n\n## Risks\n")
+	put("secret", "text/markdown; charset=utf-8", "secret.md", "# Payroll\n\nSalaries by person.\n")
+	if err := store.Flag("secret"); err != nil {
 		t.Fatal(err)
 	}
-	resolvedAt := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+	if err := store.PutSiteFile(ctx, "site", "index.html", strings.NewReader("<title>Handbook</title><h2>Setup</h2>"), "text/html"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.PutSiteManifest(ctx, "site", &storage.SiteManifest{Entry: "index.html", FileCount: 3, OwnerEmail: "owner@example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	older := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+	newer := older.Add(time.Hour)
 	for _, c := range []comments.Comment{
-		{ID: "a", ThreadID: "a", Slug: "doc", AuthorEmail: "x@example.com"},
-		{ID: "b", ThreadID: "b", Slug: "doc", AuthorEmail: "x@example.com", ResolvedAt: &resolvedAt},
-		{ID: "c", ThreadID: "a", ParentID: "a", Slug: "doc", AuthorEmail: "y@example.com"},
+		{ID: "a", ThreadID: "a", Slug: "doc", AuthorEmail: "x@example.com", Body: "older open thread", CreatedAt: older},
+		{ID: "b", ThreadID: "b", Slug: "doc", AuthorEmail: "x@example.com", Body: "resolved", CreatedAt: newer, ResolvedAt: &newer},
+		{ID: "c", ThreadID: "a", ParentID: "a", Slug: "doc", AuthorEmail: "y@example.com", Body: "a reply", CreatedAt: newer},
+		{ID: "d", ThreadID: "d", Slug: "doc", AuthorEmail: "z@example.com", Body: "newest open thread", CreatedAt: newer},
 	} {
 		if err := store.CreateComment(ctx, c); err != nil {
 			t.Fatal(err)
@@ -96,12 +115,45 @@ func TestArtifactInfoPreview(t *testing.T) {
 	}
 	info := artifactInfo{store: store}
 
-	p, err := info.Preview(ctx, "doc")
-	if err != nil {
-		t.Fatalf("Preview: %v", err)
+	tests := []struct {
+		slug string
+		want slackapp.Preview
+	}{
+		{
+			slug: "doc",
+			want: slackapp.Preview{
+				Summary: preview.Summary{
+					Kind: preview.KindMarkdown, Title: "Launch plan", Description: "Ship pricing and inventory together.",
+					Sections: []string{"Risks"}, Facts: []string{"1 min read"},
+				},
+				OwnerEmail: "owner@example.com", OpenThreads: 2,
+				LatestComment: &slackapp.CommentExcerpt{AuthorEmail: "z@example.com", Body: "newest open thread"},
+			},
+		},
+		{
+			slug: "secret",
+			want: slackapp.Preview{Summary: preview.Summary{Kind: preview.KindMarkdown, Title: "secret.md"}, OwnerEmail: "owner@example.com", HiddenReason: slackapp.HiddenFlagged},
+		},
+		{
+			slug: "site",
+			want: slackapp.Preview{Summary: preview.Summary{Kind: preview.KindSite, Title: "Handbook", Sections: []string{"Setup"}, Facts: []string{"3 files"}}, OwnerEmail: "owner@example.com"},
+		},
 	}
-	if p.Title != "doc.txt" || p.ContentType != "text/plain" || p.OwnerEmail != "owner@example.com" || p.OpenThreads != 1 {
-		t.Fatalf("preview = %+v", p)
+	for _, tt := range tests {
+		t.Run(tt.slug, func(t *testing.T) {
+			got, err := info.Preview(ctx, tt.slug)
+			if err != nil {
+				t.Fatalf("Preview: %v", err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("got  %#v\nwant %#v", got, tt.want)
+			}
+		})
+	}
+
+	a, err := info.Artifact(ctx, "doc")
+	if err != nil || a.Title != "Launch plan" || a.OwnerEmail != "owner@example.com" {
+		t.Fatalf("Artifact = %+v, %v", a, err)
 	}
 	for _, slug := range []string{"_prompt", "Bad Slug", "missing"} {
 		if _, err := info.Preview(ctx, slug); err == nil {

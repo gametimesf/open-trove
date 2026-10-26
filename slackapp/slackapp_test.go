@@ -3,6 +3,8 @@ package slackapp
 import (
 	"context"
 	"errors"
+	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/gametimesf/open-trove/comments"
 	"github.com/gametimesf/open-trove/notify"
+	"github.com/gametimesf/open-trove/preview"
 )
 
 // fakeAPI records calls and returns configured results.
@@ -27,6 +30,12 @@ type fakeAPI struct {
 	channel     *slack.Channel
 	channelErr  error
 	unfurlCalls []unfurlCall
+	allUsers    []slack.User
+	usersErr    error
+	userLists   int
+	members     [][]string // pages of conversation members
+	membersErr  error
+	memberCalls int
 }
 
 type postCall struct {
@@ -68,6 +77,34 @@ func (f *fakeAPI) PostMessageContext(_ context.Context, channelID string, option
 
 func (f *fakeAPI) GetConversationInfoContext(context.Context, *slack.GetConversationInfoInput) (*slack.Channel, error) {
 	return f.channel, f.channelErr
+}
+
+func (f *fakeAPI) GetUsersContext(context.Context, ...slack.GetUsersOption) ([]slack.User, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.userLists++
+	return f.allUsers, f.usersErr
+}
+
+func (f *fakeAPI) GetUsersInConversationContext(_ context.Context, params *slack.GetUsersInConversationParameters) ([]string, string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.memberCalls++
+	if f.membersErr != nil {
+		return nil, "", f.membersErr
+	}
+	page := 0
+	if params.Cursor != "" {
+		page, _ = strconv.Atoi(params.Cursor)
+	}
+	if page >= len(f.members) {
+		return nil, "", nil
+	}
+	next := ""
+	if page+1 < len(f.members) {
+		next = strconv.Itoa(page + 1)
+	}
+	return f.members[page], next, nil
 }
 
 func (f *fakeAPI) UnfurlMessageContext(_ context.Context, channelID, ts string, unfurls map[string]slack.Attachment, _ ...slack.MsgOption) (string, string, string, error) {
@@ -196,7 +233,7 @@ func (f fakePreviews) Preview(_ context.Context, slug string) (Preview, error) {
 }
 
 func TestUnfurler(t *testing.T) {
-	previews := fakePreviews{"q3-plan": {Title: "Q3 plan.html", ContentType: "text/html; charset=utf-8", OwnerEmail: "owner@example.com", OpenThreads: 2}}
+	previews := fakePreviews{"q3-plan": {Summary: preview.Summary{Kind: preview.KindHTML, Title: "Q3 plan"}, OwnerEmail: "owner@example.com", OpenThreads: 2}}
 	links := func(urls ...string) []slackevents.SharedLinks {
 		out := make([]slackevents.SharedLinks, 0, len(urls))
 		for _, u := range urls {
@@ -270,18 +307,84 @@ func TestUnfurler(t *testing.T) {
 	}
 }
 
+// blockTexts flattens an attachment's blocks into their visible mrkdwn text.
+func blockTexts(a slack.Attachment) []string {
+	var out []string
+	for _, b := range a.Blocks.BlockSet {
+		switch b := b.(type) {
+		case *slack.SectionBlock:
+			if b.Text != nil {
+				out = append(out, b.Text.Text)
+			}
+			for _, f := range b.Fields {
+				out = append(out, "field:"+f.Text)
+			}
+		case *slack.ContextBlock:
+			out = append(out, "context:"+b.ContextElements.Elements[0].(*slack.TextBlockObject).Text)
+		}
+	}
+	return out
+}
+
 func TestPreviewAttachmentContent(t *testing.T) {
-	a := attachment("https://trove.example.com/q3-plan", Preview{Title: "Q3 <plan>", ContentType: "text/html; charset=utf-8", OwnerEmail: "owner@example.com", OpenThreads: 1})
-	if len(a.Blocks.BlockSet) != 2 {
-		t.Fatalf("blocks = %d, want 2", len(a.Blocks.BlockSet))
+	const link = "https://trove.example.com/q3-plan"
+	rich := Preview{
+		Summary: preview.Summary{
+			Kind: preview.KindMarkdown, Title: "Q3 <plan> | v2", Description: "Why we <changed> course & what's next.",
+			Sections: []string{"Summary", "Risks & mitigations"},
+			Stats:    []preview.Stat{{Label: "Revenue", Value: "$1.2M"}, {Label: "Orders", Value: "<4k>"}},
+			Facts:    []string{"4 min read"},
+			Snippet:  "a ``` b <c>",
+		},
+		OwnerEmail: "owner@example.com", OpenThreads: 2,
+		LatestComment: &CommentExcerpt{AuthorEmail: "pat@example.com", Body: "Can we   split <this> section?"},
 	}
-	title := a.Blocks.BlockSet[0].(*slack.SectionBlock).Text.Text
-	if title != "*<https://trove.example.com/q3-plan|Q3 &lt;plan&gt;>*" {
-		t.Errorf("title = %q", title)
+	tests := []struct {
+		name string
+		p    Preview
+		want []string
+	}{
+		{
+			name: "rich summary",
+			p:    rich,
+			want: []string{
+				"*<" + link + "|Q3 &lt;plan&gt; ¦ v2>*\nWhy we &lt;changed&gt; course &amp; what's next.",
+				"field:*Revenue*\n$1.2M", "field:*Orders*\n&lt;4k&gt;",
+				"```a `\u200b`` b &lt;c&gt;```",
+				"context:*Contents:* Summary · Risks &amp; mitigations",
+				"context:Markdown · 4 min read · uploaded by owner@example.com · 2 open comment threads",
+				"context::speech_balloon: “Can we split &lt;this&gt; section?” — pat@example.com",
+			},
+		},
+		{
+			name: "hidden reason withholds content but keeps metadata",
+			p: func() Preview {
+				p := rich
+				p.HiddenReason = HiddenFlagged
+				return p
+			}(),
+			want: []string{
+				"*<" + link + "|Q3 &lt;plan&gt; ¦ v2>*",
+				"context:Markdown · uploaded by owner@example.com · 2 open comment threads",
+				"context::lock: Preview content hidden: flagged during content review",
+			},
+		},
+		{
+			name: "minimal",
+			p:    Preview{},
+			want: []string{"*<" + link + "|Trove artifact>*", "context:File"},
+		},
 	}
-	ctx := a.Blocks.BlockSet[1].(*slack.ContextBlock).ContextElements.Elements[0].(*slack.TextBlockObject).Text
-	if ctx != "text/html · uploaded by owner@example.com · 1 open comment thread" {
-		t.Errorf("context = %q", ctx)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := attachment(link, tt.p)
+			if a.Color != accentColor {
+				t.Errorf("color = %q", a.Color)
+			}
+			if got := blockTexts(a); !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("blocks:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(tt.want, "\n"))
+			}
+		})
 	}
 }
 
@@ -294,7 +397,7 @@ func (f *fakeAcker) Ack(req socketmode.Request, _ ...any) error {
 
 func TestServeAcksAndRoutesLinkShared(t *testing.T) {
 	api := &fakeAPI{channel: &slack.Channel{}}
-	u, _ := NewUnfurler(api, fakePreviews{"q3-plan": {Title: "Q3"}}, "https://trove.example.com")
+	u, _ := NewUnfurler(api, fakePreviews{"q3-plan": {Summary: preview.Summary{Title: "Q3"}}}, "https://trove.example.com")
 	events := make(chan socketmode.Event, 2)
 	events <- socketmode.Event{
 		Type:    socketmode.EventTypeEventsAPI,
@@ -311,5 +414,69 @@ func TestServeAcksAndRoutesLinkShared(t *testing.T) {
 	}
 	if len(api.unfurlCalls) != 1 {
 		t.Fatalf("unfurl calls = %d, want 1", len(api.unfurlCalls))
+	}
+}
+
+func TestUnfurlerHidesContentWhenGuestsPresent(t *testing.T) {
+	const link = "https://trove.example.com/q3-plan"
+	previews := fakePreviews{"q3-plan": {Summary: preview.Summary{Kind: preview.KindHTML, Title: "Q3", Description: "Internal numbers"}}}
+	users := []slack.User{{ID: "U1"}, {ID: "G1", IsRestricted: true}, {ID: "G2", IsUltraRestricted: true}, {ID: "G3", IsRestricted: true, Deleted: true}}
+	tests := []struct {
+		name       string
+		members    [][]string
+		usersErr   error
+		membersErr error
+		wantHidden bool
+	}{
+		{name: "members only", members: [][]string{{"U1", "G3"}}},
+		{name: "multi-channel guest", members: [][]string{{"U1", "G1"}}, wantHidden: true},
+		{name: "single-channel guest on a later page", members: [][]string{{"U1"}, {"G2"}}, wantHidden: true},
+		{name: "user list unavailable", members: [][]string{{"U1"}}, usersErr: errors.New("ratelimited"), wantHidden: true},
+		{name: "members unavailable", membersErr: errors.New("missing_scope"), wantHidden: true},
+		{name: "too many members to check", members: make([][]string, maxMemberPages+1), wantHidden: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			api := &fakeAPI{channel: &slack.Channel{}, allUsers: users, usersErr: tt.usersErr, members: tt.members, membersErr: tt.membersErr}
+			u, err := NewUnfurler(api, previews, "https://trove.example.com")
+			if err != nil {
+				t.Fatal(err)
+			}
+			u.HandleLinkShared(context.Background(), &slackevents.LinkSharedEvent{Channel: "C1", MessageTimeStamp: "1717000000.000100", Links: []slackevents.SharedLinks{{URL: link}}})
+			if len(api.unfurlCalls) != 1 {
+				t.Fatalf("unfurl calls = %d, want 1", len(api.unfurlCalls))
+			}
+			texts := strings.Join(blockTexts(api.unfurlCalls[0].unfurls[link]), "\n")
+			hidden := strings.Contains(texts, "Preview content hidden: this conversation includes guests")
+			if hidden != tt.wantHidden || strings.Contains(texts, "Internal numbers") == tt.wantHidden {
+				t.Fatalf("hidden = %t, want %t:\n%s", hidden, tt.wantHidden, texts)
+			}
+		})
+	}
+}
+
+func TestGuestDirectoryCaches(t *testing.T) {
+	api := &fakeAPI{allUsers: []slack.User{{ID: "G1", IsRestricted: true}}, members: [][]string{{"U1"}}}
+	g := newGuestDirectory(api)
+	now := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+	g.now = func() time.Time { return now }
+	ctx := context.Background()
+
+	for range 2 {
+		if has, err := g.hasGuests(ctx, "C1"); has || err != nil {
+			t.Fatalf("hasGuests = %t, %v", has, err)
+		}
+	}
+	if api.userLists != 1 || api.memberCalls != 1 {
+		t.Fatalf("user lists = %d member calls = %d, want 1 and 1", api.userLists, api.memberCalls)
+	}
+
+	now = now.Add(channelGuestTTL)
+	api.members = [][]string{{"U1", "G1"}}
+	if has, _ := g.hasGuests(ctx, "C1"); !has {
+		t.Fatal("expected guests after the channel cache expired")
+	}
+	if api.userLists != 1 || api.memberCalls != 2 {
+		t.Fatalf("user lists = %d member calls = %d, want 1 and 2", api.userLists, api.memberCalls)
 	}
 }

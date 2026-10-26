@@ -212,6 +212,46 @@ Rules:
 - Semantic HTML, ordinary id attributes, labels, ARIA labels, headings, and
   visible text improve fallback anchors.
 
+### Make links preview well
+
+When a Trove link is posted in Slack, the preview is built from the artifact
+itself, so a few conventions make it useful at a glance.
+
+HTML pages:
+
+    <title>Q3 Marketplace Review</title>
+    <meta name="description" content="Q3 beat plan on GMV; three bets for Q4.">
+    <meta name="trove:stat" content="GMV: $48.2M (+12% vs plan)">
+    <meta name="trove:stat" content="Orders: 412k">
+    <h2>Headline numbers</h2> ... <h2>Q4 bets</h2>
+
+- Title: og:title, then <title>, then the first <h1>.
+- Summary: meta description (or og:description); otherwise the first
+  paragraph of 40+ characters outside nav/header/footer. One or two sentences
+  that state the conclusion work best.
+- Stats: up to six trove:stat meta tags, each "Label: Value", shown as a grid.
+- Contents: the <h2> headings, in order (up to six).
+- Multi-page sites use the entry page.
+
+Markdown:
+
+    ---
+    title: Checkout p99 regression postmortem
+    description: p99 doubled for 40 minutes after a cache config change; no failed orders.
+    stats:
+      - "Duration: 40 min"
+      - "Failed orders: 0"
+    ---
+
+- Without frontmatter: the first "# " heading is the title and the first
+  prose paragraph is the summary.
+- "## " headings become the contents list; reading time and mermaid diagram
+  counts are added automatically.
+
+CSV previews show the header and first rows; code and text show the first
+lines; JSON shows top-level keys. Content is withheld from previews of
+flagged artifacts and in conversations that include guests.
+
 ### Agent metadata
 GET /.well-known/agent.json
 Returns structured JSON metadata for agent integration.

@@ -7,18 +7,34 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
+
+	"github.com/gametimesf/open-trove/preview"
 )
 
-// Preview is the metadata shown in a link preview. It never includes file
-// content.
+// Preview is what a link preview shows: a content summary plus artifact
+// metadata. When HiddenReason is set, only the title and metadata are shown.
 type Preview struct {
-	Title       string
-	ContentType string
-	OwnerEmail  string
-	OpenThreads int
+	preview.Summary
+	OwnerEmail    string
+	OpenThreads   int
+	LatestComment *CommentExcerpt // newest open thread root, if any
+	HiddenReason  string          // why content excerpts are withheld, e.g. flagged during review
+}
+
+// Reasons content is withheld from a preview.
+const (
+	HiddenFlagged = "flagged during content review"
+	hiddenGuests  = "this conversation includes guests"
+)
+
+// CommentExcerpt is a short quote from a comment.
+type CommentExcerpt struct {
+	AuthorEmail string
+	Body        string
 }
 
 // Previews looks up preview metadata for an artifact slug. Return an error for
@@ -32,6 +48,7 @@ type Unfurler struct {
 	api      API
 	previews Previews
 	host     string
+	guests   *guestDirectory
 }
 
 // NewUnfurler previews links whose host matches baseURL's host.
@@ -40,7 +57,7 @@ func NewUnfurler(api API, previews Previews, baseURL string) (*Unfurler, error) 
 	if err != nil || u.Host == "" {
 		return nil, fmt.Errorf("slack unfurls need an absolute base URL, got %q", baseURL)
 	}
-	return &Unfurler{api: api, previews: previews, host: strings.ToLower(u.Host)}, nil
+	return &Unfurler{api: api, previews: previews, host: strings.ToLower(u.Host), guests: newGuestDirectory(api)}, nil
 }
 
 // HandleLinkShared unfurls the Trove links in one shared message.
@@ -55,28 +72,38 @@ func (u *Unfurler) HandleLinkShared(ctx context.Context, ev *slackevents.LinkSha
 		log.Printf("INFO  slack unfurl skipped reason=%s channel=%s", reason, ev.Channel)
 		return
 	}
-
-	unfurls := make(map[string]slack.Attachment, len(ev.Links))
+	previews := make(map[string]Preview, len(ev.Links))
 	for _, link := range ev.Links {
 		slug, ok := u.artifactSlug(link.URL)
 		if !ok {
 			continue
 		}
-		preview, err := u.previews.Preview(ctx, slug)
+		p, err := u.previews.Preview(ctx, slug)
 		if err != nil {
 			log.Printf("INFO  slack unfurl skipped reason=no_preview slug=%s: %v", slug, err)
 			continue
 		}
-		unfurls[link.URL] = attachment(link.URL, preview)
+		previews[link.URL] = p
 	}
-	if len(unfurls) == 0 {
+	if len(previews) == 0 {
 		return
+	}
+	hasGuests, err := u.guests.hasGuests(ctx, ev.Channel)
+	if err != nil {
+		log.Printf("WARN  slack unfurl guest check failed channel=%s; hiding content: %v", ev.Channel, err)
+	}
+	unfurls := make(map[string]slack.Attachment, len(previews))
+	for link, p := range previews {
+		if hasGuests && p.HiddenReason == "" {
+			p.HiddenReason = hiddenGuests
+		}
+		unfurls[link] = attachment(link, p)
 	}
 	if _, _, _, err := u.api.UnfurlMessageContext(ctx, ev.Channel, ev.MessageTimeStamp, unfurls); err != nil {
 		log.Printf("WARN  slack unfurl failed channel=%s links=%d: %v", ev.Channel, len(unfurls), err)
 		return
 	}
-	log.Printf("INFO  slack unfurl sent channel=%s links=%d", ev.Channel, len(unfurls))
+	log.Printf("INFO  slack unfurl sent channel=%s links=%d content_hidden=%t", ev.Channel, len(unfurls), hasGuests)
 }
 
 // channelAllowsPreviews refuses channels shared with other organizations, and
@@ -106,14 +133,49 @@ func (u *Unfurler) artifactSlug(raw string) (string, bool) {
 	return slug, true
 }
 
+// accentColor is the bar beside every Trove preview.
+const accentColor = "#0F766E"
+
+// commentExcerptRunes bounds the quoted latest comment.
+const commentExcerptRunes = 140
+
 func attachment(link string, p Preview) slack.Attachment {
 	title := p.Title
 	if title == "" {
 		title = "Trove artifact"
 	}
-	var details []string
-	if p.ContentType != "" {
-		details = append(details, escape(strings.TrimSpace(strings.Split(p.ContentType, ";")[0])))
+	head := fmt.Sprintf("*<%s|%s>*", link, linkText(title))
+	hidden := p.HiddenReason != ""
+	if p.Description != "" && !hidden {
+		head += "\n" + escape(p.Description)
+	}
+	blocks := []slack.Block{markdownSection(head)}
+
+	if !hidden {
+		if len(p.Stats) > 0 {
+			fields := make([]*slack.TextBlockObject, 0, len(p.Stats))
+			for _, st := range p.Stats {
+				fields = append(fields, slack.NewTextBlockObject(slack.MarkdownType, "*"+escape(st.Label)+"*\n"+escape(st.Value), false, false))
+			}
+			blocks = append(blocks, slack.NewSectionBlock(nil, fields, nil))
+		}
+		if p.Snippet != "" {
+			blocks = append(blocks, markdownSection("```"+escape(strings.ReplaceAll(p.Snippet, "```", "`\u200b``"))+"```"))
+		}
+		if len(p.Sections) > 0 {
+			escaped := make([]string, 0, len(p.Sections))
+			for _, sec := range p.Sections {
+				escaped = append(escaped, escape(sec))
+			}
+			blocks = append(blocks, contextLine("*Contents:* "+strings.Join(escaped, " · ")))
+		}
+	}
+
+	details := []string{escape(p.Kind.Label())}
+	if !hidden {
+		for _, f := range p.Facts {
+			details = append(details, escape(f))
+		}
 	}
 	if p.OwnerEmail != "" {
 		details = append(details, "uploaded by "+escape(p.OwnerEmail))
@@ -125,11 +187,31 @@ func attachment(link string, p Preview) slack.Attachment {
 	default:
 		details = append(details, fmt.Sprintf("%d open comment threads", p.OpenThreads))
 	}
-	blocks := []slack.Block{
-		slack.NewSectionBlock(slack.NewTextBlockObject(slack.MarkdownType, fmt.Sprintf("*<%s|%s>*", link, linkText(title)), false, false), nil, nil),
+	blocks = append(blocks, contextLine(strings.Join(details, " · ")))
+
+	switch {
+	case hidden:
+		blocks = append(blocks, contextLine(":lock: Preview content hidden: "+escape(p.HiddenReason)))
+	case p.LatestComment != nil && p.LatestComment.Body != "":
+		quote := fmt.Sprintf(":speech_balloon: “%s” — %s", escape(excerpt(p.LatestComment.Body, commentExcerptRunes)), escape(p.LatestComment.AuthorEmail))
+		blocks = append(blocks, contextLine(quote))
 	}
-	if len(details) > 0 {
-		blocks = append(blocks, slack.NewContextBlock("", slack.NewTextBlockObject(slack.MarkdownType, strings.Join(details, " · "), false, false)))
+	return slack.Attachment{Color: accentColor, Blocks: slack.Blocks{BlockSet: blocks}}
+}
+
+func markdownSection(text string) *slack.SectionBlock {
+	return slack.NewSectionBlock(slack.NewTextBlockObject(slack.MarkdownType, text, false, false), nil, nil)
+}
+
+func contextLine(text string) *slack.ContextBlock {
+	return slack.NewContextBlock("", slack.NewTextBlockObject(slack.MarkdownType, text, false, false))
+}
+
+// excerpt collapses whitespace and shortens text to n runes.
+func excerpt(text string, n int) string {
+	text = strings.Join(strings.Fields(text), " ")
+	if utf8.RuneCountInString(text) <= n {
+		return text
 	}
-	return slack.Attachment{Blocks: slack.Blocks{BlockSet: blocks}}
+	return strings.TrimSpace(string([]rune(text)[:n-1])) + "…"
 }

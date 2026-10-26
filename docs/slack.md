@@ -22,7 +22,8 @@ app from `docs/slack-app-manifest.yaml`.
 ## Non-goals (for now)
 
 - Rendered image previews. They need server-side rendering of untrusted HTML,
-  which must run isolated with no network access. Metadata previews come first.
+  which must run isolated with no network access, and uploading the image to
+  Slack needs the `files:write` scope. Text summaries come first.
 - Replying or resolving from Slack, and per-user notification settings.
 - Channel notifications. Messages go to individuals only.
 
@@ -33,13 +34,16 @@ comments.Service ──(activity, after a successful write)──▶ notify.Disp
                                                             │ recipients, retry
                                                             ▼
                                                       notify.Notifier ──▶ Slack DM
-Slack link_shared (Socket Mode) ──▶ unfurl handler ──▶ artifact metadata ──▶ chat.unfurl
+Slack link_shared (Socket Mode) ──▶ unfurl handler ──▶ preview.Summarize ──▶ chat.unfurl
 ```
 
 - `comments` reports activity through an optional `Observer` after the write is
   stored. It knows nothing about Slack.
 - `notify` decides who to tell and delivers in the background. It depends on a
   `Notifier` interface, so Slack is one adapter among possible others (email).
+- `preview` turns the first 256 KB of an artifact into a summary (title,
+  description, sections, stats, facts, excerpt). It is pure and knows nothing
+  about storage or Slack.
 - The Slack adapter owns Slack specifics: Socket Mode, user lookup by email,
   message and unfurl formatting.
 
@@ -82,18 +86,28 @@ Operators should enable notifications together with, or after, enforcement.
 
 - Handle `link_shared` for links whose host matches `base_url`, pointing at an
   artifact (`/{slug}`, `/{slug}/raw`, site pages).
-- Preview: title, type, uploader, open comment count. No file content.
+- Preview: title, summary, author-chosen stats, section headings and a short
+  excerpt (CSV head, first lines of code, JSON keys), plus type, uploader, open
+  comment count and the newest open comment. See "Make links preview well" in
+  `llms.txt` for the authoring conventions.
 - Skip previews in channels shared with other organizations (Slack Connect). If
   the channel can't be checked, skip — fail closed.
+- Withhold content (title and metadata only) when the conversation includes
+  guests (single- or multi-channel), or the artifact was flagged by content
+  review. Guest checks use the workspace user list (cached for an hour) and
+  channel membership (cached for ten minutes); a failed check withholds content.
+- Direct messages between people aren't previewed: the bot can't inspect them,
+  so the channel check fails closed.
 - Only links in posted messages are previewed. Links still in the message
   composer need an unfurl ID that the Slack library's event type doesn't expose
   yet, so they're skipped.
 
 ## Data handling
 
-Comment excerpts and artifact titles are internal business data. They go only
-to individual members of the workspace (DMs) and to previews in channels that
-aren't shared externally.
+Comment excerpts, artifact titles and preview excerpts are internal business
+data. They go only to individual members of the workspace (DMs) and to previews
+in channels that aren't shared externally and have no guests. Flagged artifacts
+never contribute content to a preview.
 
 ## Observability
 
