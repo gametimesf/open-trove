@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.0](https://github.com/gametimesf/open-trove/compare/open-trove-v1.8.0...open-trove-v1.9.0) (2026-10-26)
+
+
+### Features
+
+* author preview cards for Slack link previews ([#39](https://github.com/gametimesf/open-trove/issues/39)) ([02ae25c](https://github.com/gametimesf/open-trove/commit/02ae25c87774a50f66f9b6a1012618e1d0e2c08e))
+
 ## [1.8.0](https://github.com/gametimesf/open-trove/compare/open-trove-v1.7.0...open-trove-v1.8.0) (2026-10-26)
 
 
