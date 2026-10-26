@@ -103,6 +103,8 @@ func main() {
 		"/_trove/*",
 		"/mcp",
 		"/delete/*",
+		// Binary image upload and download don't fit MCP tool calls.
+		"/api/artifacts/:slug/preview",
 	})
 	if err := mcp.Mount("/mcp"); err != nil {
 		log.Fatalf("mounting MCP server: %v", err)
@@ -136,6 +138,9 @@ func registerRoutes(e *echo.Echo, srv *server) {
 	e.PATCH("/api/artifacts/:slug/comments/:comment_id", srv.handleEditComment)
 	e.DELETE("/api/artifacts/:slug/comments/:comment_id", srv.handleDeleteComment)
 	e.PATCH("/api/artifacts/:slug/comments/:comment_id/resolution", srv.handleResolveCommentThread)
+	e.PUT("/api/artifacts/:slug/preview", srv.handlePutCard)
+	e.GET("/api/artifacts/:slug/preview", srv.handleGetCard)
+	e.DELETE("/api/artifacts/:slug/preview", srv.handleDeleteCard)
 
 	// Personal access tokens, only when enabled.
 	if srv.tokens != nil {

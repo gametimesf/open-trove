@@ -21,9 +21,8 @@ app from `docs/slack-app-manifest.yaml`.
 
 ## Non-goals (for now)
 
-- Rendered image previews. They need server-side rendering of untrusted HTML,
-  which must run isolated with no network access, and uploading the image to
-  Slack needs the `files:write` scope. Text summaries come first.
+- Server-side rendering of artifacts into images. It needs an isolated
+  renderer for untrusted HTML; authors render their own preview cards instead.
 - Replying or resolving from Slack, and per-user notification settings.
 - Channel notifications. Messages go to individuals only.
 
@@ -96,6 +95,16 @@ Operators should enable notifications together with, or after, enforcement.
   guests (single- or multi-channel), or the artifact was flagged by content
   review. Guest checks use the workspace user list (cached for an hour) and
   channel membership (cached for ten minutes); a failed check withholds content.
+- Preview cards: an author can store a PNG or JPEG for an artifact
+  (`PUT /api/artifacts/{slug}/preview`). When present, the preview shows it in
+  place of the excerpt and contents line. Precedence is card image, then
+  author tags (meta tags or frontmatter), then content Trove derives itself;
+  each step falls back to the next.
+- Cards are uploaded to Slack once per image (`files:write`), without sharing
+  them to any conversation, and referenced by file ID. A failed upload or an
+  unfurl Slack rejects (retried once, since new files take a moment to
+  process) falls back to the text preview and backs off for ten minutes.
+  Cards are never uploaded for hidden previews (flagged, or guests present).
 - Direct messages between people aren't previewed: the bot can't inspect them,
   so the channel check fails closed.
 - Only links in posted messages are previewed. Links still in the message
@@ -107,7 +116,8 @@ Operators should enable notifications together with, or after, enforcement.
 Comment excerpts, artifact titles and preview excerpts are internal business
 data. They go only to individual members of the workspace (DMs) and to previews
 in channels that aren't shared externally and have no guests. Flagged artifacts
-never contribute content to a preview.
+never contribute content to a preview. Preview card images are stored in Slack
+as files owned by the app and not shared to any conversation.
 
 ## Observability
 

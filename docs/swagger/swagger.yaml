@@ -88,6 +88,29 @@ definitions:
         example: https://trove.example.com/my-report
         type: string
     type: object
+  cmd_server.cardResponse:
+    properties:
+      alt:
+        type: string
+      artifact_version:
+        description: version the card was made for
+        type: string
+      content_type:
+        type: string
+      height:
+        type: integer
+      sha256:
+        type: string
+      updated_at:
+        type: string
+      updated_by_email:
+        type: string
+      url:
+        example: https://trove.example.com/api/artifacts/q3-review/preview
+        type: string
+      width:
+        type: integer
+    type: object
   comments.Anchor:
     properties:
       label:
@@ -633,6 +656,105 @@ paths:
       summary: Resolve or reopen an artifact comment thread
       tags:
       - comments
+  /api/artifacts/{slug}/preview:
+    delete:
+      description: Link previews fall back to the summary generated from the artifact.
+      parameters:
+      - description: Email used for audit attribution
+        in: header
+        name: X-Trove-User-Email
+        required: true
+        type: string
+      - description: Artifact slug
+        in: path
+        name: slug
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+      summary: Remove an artifact's preview card
+      tags:
+      - previews
+    get:
+      parameters:
+      - description: Artifact slug
+        in: path
+        name: slug
+        required: true
+        type: string
+      produces:
+      - image/png
+      - image/jpeg
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+      summary: Get an artifact's preview card image
+      tags:
+      - previews
+    put:
+      consumes:
+      - multipart/form-data
+      description: Stores an author-made preview image (PNG or JPEG, up to 2 MB and
+        2000x2000; 1200x630 recommended) shown in link previews instead of the generated
+        excerpt. Render it yourself, e.g. a compact HTML card screenshotted with a
+        headless browser. Replaces any existing card.
+      parameters:
+      - description: Email used for audit attribution
+        in: header
+        name: X-Trove-User-Email
+        required: true
+        type: string
+      - description: Artifact slug
+        in: path
+        name: slug
+        required: true
+        type: string
+      - description: PNG or JPEG preview image
+        in: formData
+        name: image
+        required: true
+        type: file
+      - description: Alt text describing the image
+        in: formData
+        name: alt
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/cmd_server.cardResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+        "413":
+          description: Request Entity Too Large
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+      summary: Set an artifact's preview card
+      tags:
+      - previews
   /delete/{slug}:
     delete:
       description: Deletes a file by slug. This endpoint is intentionally not exposed

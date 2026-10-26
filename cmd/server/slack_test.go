@@ -101,6 +101,12 @@ func TestArtifactInfoPreview(t *testing.T) {
 	if err := store.PutSiteManifest(ctx, "site", &storage.SiteManifest{Entry: "index.html", FileCount: 3, OwnerEmail: "owner@example.com"}); err != nil {
 		t.Fatal(err)
 	}
+	card := preview.Card{Image: []byte("png"), ContentType: "image/png", Width: 1200, Height: 630, SHA256: strings.Repeat("c", 64)}
+	for _, slug := range []string{"doc", "secret"} {
+		if err := store.PutCard(ctx, slug, card); err != nil {
+			t.Fatal(err)
+		}
+	}
 	older := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
 	newer := older.Add(time.Hour)
 	for _, c := range []comments.Comment{
@@ -128,6 +134,7 @@ func TestArtifactInfoPreview(t *testing.T) {
 				},
 				OwnerEmail: "owner@example.com", OpenThreads: 2,
 				LatestComment: &slackapp.CommentExcerpt{AuthorEmail: "z@example.com", Body: "newest open thread"},
+				Card:          &card,
 			},
 		},
 		{

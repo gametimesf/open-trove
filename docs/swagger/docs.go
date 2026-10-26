@@ -519,6 +519,149 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/artifacts/{slug}/preview": {
+            "get": {
+                "produces": [
+                    "image/png",
+                    "image/jpeg"
+                ],
+                "tags": [
+                    "previews"
+                ],
+                "summary": "Get an artifact's preview card image",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Artifact slug",
+                        "name": "slug",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Stores an author-made preview image (PNG or JPEG, up to 2 MB and 2000x2000; 1200x630 recommended) shown in link previews instead of the generated excerpt. Render it yourself, e.g. a compact HTML card screenshotted with a headless browser. Replaces any existing card.",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "previews"
+                ],
+                "summary": "Set an artifact's preview card",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Email used for audit attribution",
+                        "name": "X-Trove-User-Email",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Artifact slug",
+                        "name": "slug",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "file",
+                        "description": "PNG or JPEG preview image",
+                        "name": "image",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Alt text describing the image",
+                        "name": "alt",
+                        "in": "formData"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.cardResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Link previews fall back to the summary generated from the artifact.",
+                "tags": [
+                    "previews"
+                ],
+                "summary": "Remove an artifact's preview card",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Email used for audit attribution",
+                        "name": "X-Trove-User-Email",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Artifact slug",
+                        "name": "slug",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/delete/{slug}": {
             "delete": {
                 "description": "Deletes a file by slug. This endpoint is intentionally not exposed via MCP or the UI.",
@@ -950,6 +1093,40 @@ const docTemplate = `{
                 "url": {
                     "type": "string",
                     "example": "https://trove.example.com/my-report"
+                }
+            }
+        },
+        "cmd_server.cardResponse": {
+            "type": "object",
+            "properties": {
+                "alt": {
+                    "type": "string"
+                },
+                "artifact_version": {
+                    "description": "version the card was made for",
+                    "type": "string"
+                },
+                "content_type": {
+                    "type": "string"
+                },
+                "height": {
+                    "type": "integer"
+                },
+                "sha256": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "updated_by_email": {
+                    "type": "string"
+                },
+                "url": {
+                    "type": "string",
+                    "example": "https://trove.example.com/api/artifacts/q3-review/preview"
+                },
+                "width": {
+                    "type": "integer"
                 }
             }
         },

@@ -112,6 +112,14 @@ func (a artifactInfo) Preview(ctx context.Context, slug string) (slackapp.Previe
 	p := slackapp.Preview{Summary: d.summary, OwnerEmail: d.owner}
 	if d.flagged {
 		p.HiddenReason = slackapp.HiddenFlagged
+	} else {
+		card, err := a.store.GetCard(ctx, slug)
+		switch {
+		case err == nil:
+			p.Card = &card
+		case !errors.Is(err, preview.ErrCardNotFound):
+			log.Printf("WARN  preview card unavailable slug=%s: %v", slug, err)
+		}
 	}
 	var latest *comments.Comment
 	for i, c := range stored {

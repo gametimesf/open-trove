@@ -16,9 +16,13 @@
 #   users:read.email    find the Slack user for a Trove email
 #   links:read,
 #   links:write         receive link_shared and post previews
+#   files:write         upload author-made preview card images; they are
+#                       never shared to a conversation, only shown in previews
+#                       (optional: without it previews stay text-only)
 #   channels:read, groups:read, im:read, mpim:read
 #                       check whether a channel is shared with another
-#                       organization before previewing (fails closed)
+#                       organization or includes guests before previewing
+#                       (fails closed)
 
 _metadata:
   major_version: 1
@@ -48,6 +52,7 @@ oauth_config:
       - users:read.email
       - links:read
       - links:write
+      - files:write
       - channels:read
       - groups:read
       - im:read

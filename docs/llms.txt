@@ -252,6 +252,30 @@ CSV previews show the header and first rows; code and text show the first
 lines; JSON shows top-level keys. Content is withheld from previews of
 flagged artifacts and in conversations that include guests.
 
+### Set a preview card (optional image)
+
+For a richer Slack preview, render a compact image yourself (for example a
+small HTML card with the title and one key chart, screenshotted with a
+headless browser) and attach it. The card replaces the excerpt and contents
+line; the title, summary, stats and comment details still show.
+
+    curl -X PUT https://trove.example.com/api/artifacts/q3-review/preview \
+      -H "X-Trove-User-Email: you@example.com" \
+      -F "image=@card.png" \
+      -F "alt=Q3 GMV vs plan by week"
+
+    chrome --headless --hide-scrollbars --window-size=1200,630 \
+      --screenshot=card.png card.html
+
+- PNG or JPEG, 100–2000 px per side, up to 2 MB; 1200x630 is recommended.
+  Keep text large: Slack shows it small.
+- Re-upload to replace; DELETE the same URL to go back to the text preview.
+  Overwriting the artifact keeps the card.
+- GET returns the stored image. Cards are not shown for flagged artifacts or
+  in conversations with guests.
+- Previews fall back in order: card image, then the tags above, then content
+  Trove derives from the file.
+
 ### Agent metadata
 GET /.well-known/agent.json
 Returns structured JSON metadata for agent integration.

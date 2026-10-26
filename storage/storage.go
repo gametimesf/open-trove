@@ -11,6 +11,7 @@ import (
 	"github.com/gametimesf/open-trove/auth"
 	"github.com/gametimesf/open-trove/comments"
 	"github.com/gametimesf/open-trove/internal/config"
+	"github.com/gametimesf/open-trove/preview"
 )
 
 var (
@@ -22,6 +23,7 @@ var (
 type Store interface {
 	comments.Repository
 	auth.TokenRepository
+	preview.CardRepository
 
 	Put(ctx context.Context, slug string, body io.Reader, opts PutOptions) error
 	Get(ctx context.Context, slug string, rangeHeader string) (io.ReadCloser, *FileMetadata, error)
