@@ -18,6 +18,7 @@ import (
 	"github.com/gametimesf/open-trove/comments"
 	"github.com/gametimesf/open-trove/intake"
 	"github.com/gametimesf/open-trove/internal/favicon"
+	"github.com/gametimesf/open-trove/preview"
 	"github.com/gametimesf/open-trove/storage"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
@@ -888,6 +889,9 @@ func (s *server) handleDelete(c echo.Context) error {
 		// surfacing cleanup failure for repair instead of claiming the file
 		// remains available.
 		log.Printf("WARN deleting comments for removed object %s: %v", slug, err)
+	}
+	if err := s.store.DeleteCard(c.Request().Context(), slug); err != nil && !errors.Is(err, preview.ErrCardNotFound) {
+		log.Printf("WARN deleting preview card for removed object %s: %v", slug, err)
 	}
 
 	return c.NoContent(http.StatusNoContent)

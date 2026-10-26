@@ -13,6 +13,7 @@ import (
 
 	"github.com/gametimesf/open-trove/auth"
 	"github.com/gametimesf/open-trove/comments"
+	"github.com/gametimesf/open-trove/preview"
 	"github.com/gametimesf/open-trove/storage"
 )
 
@@ -32,6 +33,7 @@ type Store struct {
 	manifests map[string]*storage.UserManifest
 	comments  map[string][]comments.Comment
 	tokens    map[string]auth.Token
+	cards     map[string]preview.Card
 }
 
 // NewStore creates a ready-to-use fake Store.
@@ -41,6 +43,7 @@ func NewStore() *Store {
 		manifests: make(map[string]*storage.UserManifest),
 		comments:  make(map[string][]comments.Comment),
 		tokens:    make(map[string]auth.Token),
+		cards:     make(map[string]preview.Card),
 	}
 }
 

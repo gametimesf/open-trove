@@ -3,6 +3,7 @@ package slackapp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -36,6 +37,9 @@ type fakeAPI struct {
 	members     [][]string // pages of conversation members
 	membersErr  error
 	memberCalls int
+	uploads     []slack.UploadFileParameters
+	uploadErr   error
+	unfurlErrs  []error // returned by successive UnfurlMessageContext calls
 }
 
 type postCall struct {
@@ -108,8 +112,25 @@ func (f *fakeAPI) GetUsersInConversationContext(_ context.Context, params *slack
 }
 
 func (f *fakeAPI) UnfurlMessageContext(_ context.Context, channelID, ts string, unfurls map[string]slack.Attachment, _ ...slack.MsgOption) (string, string, string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.unfurlCalls = append(f.unfurlCalls, unfurlCall{channel: channelID, ts: ts, unfurls: unfurls})
+	if len(f.unfurlErrs) > 0 {
+		err := f.unfurlErrs[0]
+		f.unfurlErrs = f.unfurlErrs[1:]
+		return "", "", "", err
+	}
 	return channelID, ts, "", nil
+}
+
+func (f *fakeAPI) UploadFileContext(_ context.Context, params slack.UploadFileParameters) (*slack.FileSummary, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.uploads = append(f.uploads, params)
+	if f.uploadErr != nil {
+		return nil, f.uploadErr
+	}
+	return &slack.FileSummary{ID: fmt.Sprintf("F%d", len(f.uploads))}, nil
 }
 
 var reply = notify.Notification{
@@ -478,5 +499,103 @@ func TestGuestDirectoryCaches(t *testing.T) {
 	}
 	if api.userLists != 1 || api.memberCalls != 2 {
 		t.Fatalf("user lists = %d member calls = %d, want 1 and 2", api.userLists, api.memberCalls)
+	}
+}
+
+// imageFileIDs returns the Slack file IDs referenced by image blocks.
+func imageFileIDs(a slack.Attachment) []string {
+	var ids []string
+	for _, b := range a.Blocks.BlockSet {
+		if img, ok := b.(*slack.ImageBlock); ok && img.SlackFile != nil {
+			ids = append(ids, img.SlackFile.ID)
+		}
+	}
+	return ids
+}
+
+func TestUnfurlerCards(t *testing.T) {
+	const link = "https://trove.example.com/q3-plan"
+	card := &preview.Card{Image: []byte("png"), ContentType: "image/png", SHA256: strings.Repeat("a", 64), Alt: "Q3 at a glance"}
+	withCard := Preview{
+		Summary: preview.Summary{Kind: preview.KindHTML, Title: "Q3", Description: "Summary", Snippet: "excerpt", Sections: []string{"One"}},
+		Card:    card,
+	}
+	event := &slackevents.LinkSharedEvent{Channel: "C1", MessageTimeStamp: "1717000000.000100", Links: []slackevents.SharedLinks{{URL: link}}}
+	tests := []struct {
+		name        string
+		preview     Preview
+		members     [][]string
+		uploadErr   error
+		unfurlErrs  []error
+		wantUploads int
+		wantCalls   int
+		wantImage   bool
+	}{
+		{name: "card replaces excerpt", preview: withCard, wantUploads: 1, wantCalls: 1, wantImage: true},
+		{name: "upload failure falls back to text", preview: withCard, uploadErr: errors.New("missing_scope"), wantUploads: 1, wantCalls: 1},
+		{name: "slack still processing: retry with card", preview: withCard, unfurlErrs: []error{errors.New("invalid_blocks")}, wantUploads: 1, wantCalls: 2, wantImage: true},
+		{name: "slack rejects card: fall back to text", preview: withCard, unfurlErrs: []error{errors.New("invalid_blocks"), errors.New("invalid_blocks")}, wantUploads: 1, wantCalls: 3},
+		{name: "guests: no upload", preview: withCard, members: [][]string{{"G1"}}, wantCalls: 1},
+		{name: "flagged: no upload", preview: func() Preview { p := withCard; p.HiddenReason = HiddenFlagged; return p }(), wantCalls: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			api := &fakeAPI{
+				channel: &slack.Channel{}, allUsers: []slack.User{{ID: "G1", IsRestricted: true}}, members: tt.members,
+				uploadErr: tt.uploadErr, unfurlErrs: tt.unfurlErrs,
+			}
+			u, err := NewUnfurler(api, fakePreviews{"q3-plan": tt.preview}, "https://trove.example.com")
+			if err != nil {
+				t.Fatal(err)
+			}
+			u.retryDelay = 0
+			u.HandleLinkShared(context.Background(), event)
+
+			if len(api.uploads) != tt.wantUploads || len(api.unfurlCalls) != tt.wantCalls {
+				t.Fatalf("uploads = %d, unfurl calls = %d; want %d and %d", len(api.uploads), len(api.unfurlCalls), tt.wantUploads, tt.wantCalls)
+			}
+			if tt.wantUploads > 0 && (api.uploads[0].AltTxt != "Q3 at a glance" || api.uploads[0].Channel != "" || len(api.uploads[0].Channels) != 0) {
+				t.Errorf("upload params = %+v; must not share to a conversation", api.uploads[0])
+			}
+			last := api.unfurlCalls[len(api.unfurlCalls)-1].unfurls[link]
+			ids := imageFileIDs(last)
+			texts := strings.Join(blockTexts(last), "\n")
+			if tt.wantImage {
+				if len(ids) != 1 || ids[0] != "F1" || strings.Contains(texts, "excerpt") || strings.Contains(texts, "Contents") {
+					t.Fatalf("want card instead of excerpt; ids=%v\n%s", ids, texts)
+				}
+				return
+			}
+			if len(ids) != 0 {
+				t.Fatalf("unexpected image %v", ids)
+			}
+		})
+	}
+}
+
+func TestCardUploaderCachesAndBacksOff(t *testing.T) {
+	api := &fakeAPI{}
+	u := newCardUploader(api)
+	now := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+	u.now = func() time.Time { return now }
+	ctx := context.Background()
+	card := &preview.Card{Image: []byte("png"), ContentType: "image/png", SHA256: strings.Repeat("b", 64)}
+
+	for range 2 {
+		if id, err := u.fileID(ctx, card); err != nil || id != "F1" {
+			t.Fatalf("fileID = %q, %v", id, err)
+		}
+	}
+	if len(api.uploads) != 1 || api.uploads[0].Filename != "trove-preview-bbbbbbbbbbbb.png" {
+		t.Fatalf("uploads = %+v", api.uploads)
+	}
+
+	u.reject(card)
+	if _, err := u.fileID(ctx, card); err == nil || len(api.uploads) != 1 {
+		t.Fatalf("expected back-off after rejection; err=%v uploads=%d", err, len(api.uploads))
+	}
+	now = now.Add(cardFailureTTL)
+	if id, err := u.fileID(ctx, card); err != nil || id != "F2" {
+		t.Fatalf("fileID after back-off = %q, %v", id, err)
 	}
 }

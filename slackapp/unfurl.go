@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/slack-go/slack"
@@ -23,6 +24,9 @@ type Preview struct {
 	OpenThreads   int
 	LatestComment *CommentExcerpt // newest open thread root, if any
 	HiddenReason  string          // why content excerpts are withheld, e.g. flagged during review
+	Card          *preview.Card   // author-made preview image, if any
+
+	cardFileID string // Slack file ID for Card, set by the unfurler
 }
 
 // Reasons content is withheld from a preview.
@@ -49,6 +53,10 @@ type Unfurler struct {
 	previews Previews
 	host     string
 	guests   *guestDirectory
+	cards    *cardUploader
+	// retryDelay is how long to wait before retrying an unfurl whose image
+	// Slack may still be processing.
+	retryDelay time.Duration
 }
 
 // NewUnfurler previews links whose host matches baseURL's host.
@@ -57,7 +65,7 @@ func NewUnfurler(api API, previews Previews, baseURL string) (*Unfurler, error) 
 	if err != nil || u.Host == "" {
 		return nil, fmt.Errorf("slack unfurls need an absolute base URL, got %q", baseURL)
 	}
-	return &Unfurler{api: api, previews: previews, host: strings.ToLower(u.Host), guests: newGuestDirectory(api)}, nil
+	return &Unfurler{api: api, previews: previews, host: strings.ToLower(u.Host), guests: newGuestDirectory(api), cards: newCardUploader(api), retryDelay: 2 * time.Second}, nil
 }
 
 // HandleLinkShared unfurls the Trove links in one shared message.
@@ -92,18 +100,68 @@ func (u *Unfurler) HandleLinkShared(ctx context.Context, ev *slackevents.LinkSha
 	if err != nil {
 		log.Printf("WARN  slack unfurl guest check failed channel=%s; hiding content: %v", ev.Channel, err)
 	}
-	unfurls := make(map[string]slack.Attachment, len(previews))
+	withCards := 0
 	for link, p := range previews {
 		if hasGuests && p.HiddenReason == "" {
 			p.HiddenReason = hiddenGuests
 		}
-		unfurls[link] = attachment(link, p)
+		if p.Card != nil && p.HiddenReason == "" {
+			id, err := u.cards.fileID(ctx, p.Card)
+			if err != nil {
+				log.Printf("WARN  slack unfurl card unavailable link=%s; using text preview: %v", link, err)
+			} else {
+				p.cardFileID = id
+				withCards++
+			}
+		}
+		previews[link] = p
 	}
-	if _, _, _, err := u.api.UnfurlMessageContext(ctx, ev.Channel, ev.MessageTimeStamp, unfurls); err != nil {
-		log.Printf("WARN  slack unfurl failed channel=%s links=%d: %v", ev.Channel, len(unfurls), err)
+
+	err = u.unfurl(ctx, ev, previews)
+	if err != nil && withCards > 0 {
+		// A just-uploaded image can take a moment to process; retry once, then
+		// fall back to text previews.
+		if sleepErr := sleepContext(ctx, u.retryDelay); sleepErr == nil {
+			err = u.unfurl(ctx, ev, previews)
+		}
+		if err != nil {
+			log.Printf("WARN  slack unfurl with card failed channel=%s; retrying as text: %v", ev.Channel, err)
+			for link, p := range previews {
+				if p.cardFileID != "" {
+					u.cards.reject(p.Card)
+					p.cardFileID = ""
+					previews[link] = p
+				}
+			}
+			withCards = 0
+			err = u.unfurl(ctx, ev, previews)
+		}
+	}
+	if err != nil {
+		log.Printf("WARN  slack unfurl failed channel=%s links=%d: %v", ev.Channel, len(previews), err)
 		return
 	}
-	log.Printf("INFO  slack unfurl sent channel=%s links=%d content_hidden=%t", ev.Channel, len(unfurls), hasGuests)
+	log.Printf("INFO  slack unfurl sent channel=%s links=%d cards=%d content_hidden=%t", ev.Channel, len(previews), withCards, hasGuests)
+}
+
+func (u *Unfurler) unfurl(ctx context.Context, ev *slackevents.LinkSharedEvent, previews map[string]Preview) error {
+	unfurls := make(map[string]slack.Attachment, len(previews))
+	for link, p := range previews {
+		unfurls[link] = attachment(link, p)
+	}
+	_, _, _, err := u.api.UnfurlMessageContext(ctx, ev.Channel, ev.MessageTimeStamp, unfurls)
+	return err
+}
+
+func sleepContext(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 // channelAllowsPreviews refuses channels shared with other organizations, and
@@ -150,6 +208,14 @@ func attachment(link string, p Preview) slack.Attachment {
 		head += "\n" + escape(p.Description)
 	}
 	blocks := []slack.Block{markdownSection(head)}
+	hasCard := !hidden && p.cardFileID != ""
+	if hasCard {
+		alt := p.Card.Alt
+		if alt == "" {
+			alt = "Preview of " + title
+		}
+		blocks = append(blocks, slack.NewImageBlockSlackFile(&slack.SlackFileObject{ID: p.cardFileID}, alt, "", nil))
+	}
 
 	if !hidden {
 		if len(p.Stats) > 0 {
@@ -159,10 +225,10 @@ func attachment(link string, p Preview) slack.Attachment {
 			}
 			blocks = append(blocks, slack.NewSectionBlock(nil, fields, nil))
 		}
-		if p.Snippet != "" {
+		if p.Snippet != "" && !hasCard {
 			blocks = append(blocks, markdownSection("```"+escape(strings.ReplaceAll(p.Snippet, "```", "`\u200b``"))+"```"))
 		}
-		if len(p.Sections) > 0 {
+		if len(p.Sections) > 0 && !hasCard {
 			escaped := make([]string, 0, len(p.Sections))
 			for _, sec := range p.Sections {
 				escaped = append(escaped, escape(sec))
