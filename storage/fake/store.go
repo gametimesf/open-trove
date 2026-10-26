@@ -22,6 +22,7 @@ type storedObject struct {
 	filename    string
 	customSlug  bool
 	ownerEmail  string
+	flagged     bool
 }
 
 // Store is an in-memory fake of storage.Store for testing.
@@ -111,7 +112,21 @@ func (s *Store) Metadata(_ context.Context, slug string) (*storage.FileMetadata,
 		Version:     objectVersion(obj.data),
 		CustomSlug:  obj.customSlug,
 		OwnerEmail:  obj.ownerEmail,
+		Flagged:     obj.flagged,
 	}, nil
+}
+
+// Flag marks a stored object as flagged by content review, as the intake
+// scanner does in S3 object metadata.
+func (s *Store) Flag(slug string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	obj, ok := s.objects[slug]
+	if !ok {
+		return storage.ErrNotFound
+	}
+	obj.flagged = true
+	return nil
 }
 
 func (s *Store) RecordUpload(_ context.Context, userID string, record storage.ActivityRecord) error {

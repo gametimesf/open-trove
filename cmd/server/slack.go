@@ -1,9 +1,11 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 
 	"github.com/slack-go/slack"
@@ -12,6 +14,7 @@ import (
 	"github.com/gametimesf/open-trove/comments"
 	"github.com/gametimesf/open-trove/internal/config"
 	"github.com/gametimesf/open-trove/notify"
+	"github.com/gametimesf/open-trove/preview"
 	"github.com/gametimesf/open-trove/slackapp"
 	"github.com/gametimesf/open-trove/storage"
 )
@@ -23,44 +26,82 @@ type artifactInfo struct {
 	store storage.Store
 }
 
-func (a artifactInfo) describe(ctx context.Context, slug string) (title, contentType, owner string, err error) {
+// artifactDescription is what notifications and previews know about an artifact.
+type artifactDescription struct {
+	summary preview.Summary
+	owner   string
+	flagged bool
+}
+
+// describe summarizes an artifact's content. Flagged artifacts are not read,
+// and a failed read degrades to a metadata-only summary.
+func (a artifactInfo) describe(ctx context.Context, slug string) (artifactDescription, error) {
 	if isInternalSlug(slug) || validateSlug(slug) != nil {
-		return "", "", "", errNotArtifact
+		return artifactDescription{}, errNotArtifact
 	}
 	isSite, err := a.store.HeadSite(ctx, slug)
 	if err != nil {
-		return "", "", "", fmt.Errorf("checking site: %w", err)
+		return artifactDescription{}, fmt.Errorf("checking site: %w", err)
 	}
 	if isSite {
 		manifest, err := a.store.GetSiteManifest(ctx, slug)
 		if err != nil {
-			return "", "", "", fmt.Errorf("reading site manifest: %w", err)
+			return artifactDescription{}, fmt.Errorf("reading site manifest: %w", err)
 		}
-		return slug, "website", manifest.OwnerEmail, nil
+		entry, err := a.readSiteEntry(ctx, slug, manifest.Entry)
+		if err != nil {
+			log.Printf("WARN  preview content unavailable slug=%s: %v", slug, err)
+		}
+		summary := preview.SummarizeSite(entry, manifest.FileCount)
+		summary.Title = cmp.Or(summary.Title, slug)
+		return artifactDescription{summary: summary, owner: manifest.OwnerEmail}, nil
 	}
 	meta, err := a.store.Metadata(ctx, slug)
 	if err != nil {
-		return "", "", "", fmt.Errorf("reading metadata: %w", err)
+		return artifactDescription{}, fmt.Errorf("reading metadata: %w", err)
 	}
-	title = meta.Filename
-	if title == "" {
-		title = slug
+	var head []byte
+	if !meta.Flagged {
+		if head, err = a.readHead(ctx, slug); err != nil {
+			log.Printf("WARN  preview content unavailable slug=%s: %v", slug, err)
+		}
 	}
-	return title, meta.ContentType, meta.OwnerEmail, nil
+	summary := preview.Summarize(meta.ContentType, meta.Filename, head)
+	summary.Title = cmp.Or(summary.Title, meta.Filename, slug)
+	return artifactDescription{summary: summary, owner: meta.OwnerEmail, flagged: meta.Flagged}, nil
+}
+
+// readHead reads the leading bytes preview.Summarize needs.
+func (a artifactInfo) readHead(ctx context.Context, slug string) ([]byte, error) {
+	body, _, err := a.store.Get(ctx, slug, fmt.Sprintf("bytes=0-%d", preview.MaxBytes))
+	if err != nil {
+		return nil, err
+	}
+	defer body.Close()
+	return io.ReadAll(io.LimitReader(body, preview.MaxBytes+1))
+}
+
+func (a artifactInfo) readSiteEntry(ctx context.Context, slug, entry string) ([]byte, error) {
+	body, _, err := a.store.GetSiteFile(ctx, slug, entry)
+	if err != nil {
+		return nil, err
+	}
+	defer body.Close()
+	return io.ReadAll(io.LimitReader(body, preview.MaxBytes))
 }
 
 // Artifact implements notify.ArtifactLookup.
 func (a artifactInfo) Artifact(ctx context.Context, slug string) (notify.Artifact, error) {
-	title, _, owner, err := a.describe(ctx, slug)
+	d, err := a.describe(ctx, slug)
 	if err != nil {
 		return notify.Artifact{}, err
 	}
-	return notify.Artifact{Title: title, OwnerEmail: owner}, nil
+	return notify.Artifact{Title: d.summary.Title, OwnerEmail: d.owner}, nil
 }
 
 // Preview implements slackapp.Previews.
 func (a artifactInfo) Preview(ctx context.Context, slug string) (slackapp.Preview, error) {
-	title, contentType, owner, err := a.describe(ctx, slug)
+	d, err := a.describe(ctx, slug)
 	if err != nil {
 		return slackapp.Preview{}, err
 	}
@@ -68,13 +109,24 @@ func (a artifactInfo) Preview(ctx context.Context, slug string) (slackapp.Previe
 	if err != nil {
 		return slackapp.Preview{}, fmt.Errorf("listing comments: %w", err)
 	}
-	open := 0
-	for _, c := range stored {
-		if c.ParentID == "" && c.ResolvedAt == nil && c.DeletedAt == nil {
-			open++
+	p := slackapp.Preview{Summary: d.summary, OwnerEmail: d.owner}
+	if d.flagged {
+		p.HiddenReason = slackapp.HiddenFlagged
+	}
+	var latest *comments.Comment
+	for i, c := range stored {
+		if c.ParentID != "" || c.ResolvedAt != nil || c.DeletedAt != nil {
+			continue
+		}
+		p.OpenThreads++
+		if latest == nil || c.CreatedAt.After(latest.CreatedAt) {
+			latest = &stored[i]
 		}
 	}
-	return slackapp.Preview{Title: title, ContentType: contentType, OwnerEmail: owner, OpenThreads: open}, nil
+	if latest != nil {
+		p.LatestComment = &slackapp.CommentExcerpt{AuthorEmail: latest.AuthorEmail, Body: latest.Body}
+	}
+	return p, nil
 }
 
 // startSlack connects the Slack app when enabled and returns the comment
