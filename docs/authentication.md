@@ -156,22 +156,21 @@ The token UI lives on My Trove: create (name and expiry), list, and revoke.
 
 ## MCP
 
-MCP tool calls run as in-process requests created by `echo-mcp`. The library
-builds each request with a fresh context and copies only declared tool
-arguments, so neither a Bearer token nor a proxy JWT on the outer `/mcp`
-request reaches the handler. The email is a tool argument today.
+MCP tool calls run as in-process requests created by `echo-mcp`. Trove uses a
+fork, `gametimesf/echo-mcp` (`replace` in `go.mod`), that carries
+BrunoKrugel/echo-mcp#15 until upstream merges it: tool requests run with the
+incoming request's context, and `Authorization` and `Cf-Access-Jwt-Assertion`
+are copied from the `/mcp` request onto every tool call (`cmd/server/mcp.go`).
+Tool arguments can't set those headers.
 
-Plan:
+So an MCP client is identified the same way as any other client:
 
-1. Contribute an `echo-mcp` change that runs tool requests with the incoming
-   request's context and forwards a configured header allowlist
-   (`Authorization`, `Cf-Access-Jwt-Assertion`). Proposed upstream as
-   BrunoKrugel/echo-mcp#15; adopt the release that includes it.
-2. Forward only those headers. Tool arguments named like identity headers are
-   ignored in `enforce` mode.
-
-Until step 1 ships, MCP stays on asserted identity: `shadow` is safe, `enforce`
-must not be enabled for deployments that rely on MCP.
+- Behind the identity proxy, the proxy's JWT on `/mcp` verifies every tool
+  write.
+- Otherwise, configure the client to send `Authorization: Bearer trv_...` on
+  `/mcp` (Claude Code and Codex accept custom headers for HTTP MCP servers).
+- With neither, `shadow` falls back to the email the agent passes as the
+  `X-Trove-User-Email` tool argument, and `enforce` refuses `/mcp` writes.
 
 Later: MCP's OAuth authorization flow (browser callback, PKCE) can replace
 copy-pasted tokens. It reuses the token store and adds an authorization

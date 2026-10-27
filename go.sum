@@ -1,5 +1,3 @@
-github.com/BrunoKrugel/echo-mcp v0.1.11 h1:zmipch3fEES1IQSv44AJC5Dd6CJj8D7en82ZRIGnOTU=
-github.com/BrunoKrugel/echo-mcp v0.1.11/go.mod h1:H0pmdFxDONfEUdoq7BjzeprwlyzT0kSSE+XThculHE8=
 github.com/JohannesKaufmann/html-to-markdown v1.6.0 h1:04VXMiE50YYfCfLboJCLcgqF5x+rHJnb1ssNmqpLH/k=
 github.com/JohannesKaufmann/html-to-markdown v1.6.0/go.mod h1:NUI78lGg/a7vpEJTz/0uOcYMaibytE4BUOQS8k78yPQ=
 github.com/KyleBanks/depth v1.2.1 h1:5h8fQADFrWtarTdtDudMmGsC7GPbOAu6RVB3ffsVFHc=
@@ -61,6 +59,8 @@ github.com/cloudwego/base64x v0.1.6/go.mod h1:OFcloc187FXDaYHvrNIjxSe8ncn0OOM8gE
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
+github.com/gametimesf/echo-mcp v0.1.12-gt.1 h1:/ryzgktTpS4hGC4cRu88fds48DDgTScA5TDyy0j97bY=
+github.com/gametimesf/echo-mcp v0.1.12-gt.1/go.mod h1:H0pmdFxDONfEUdoq7BjzeprwlyzT0kSSE+XThculHE8=
 github.com/go-openapi/jsonpointer v0.22.5 h1:8on/0Yp4uTb9f4XvTrM2+1CPrV05QPZXu+rvu2o9jcA=
 github.com/go-openapi/jsonpointer v0.22.5/go.mod h1:gyUR3sCvGSWchA2sUBJGluYMbe1zazrYWIkWPjjMUY0=
 github.com/go-openapi/jsonreference v0.21.5 h1:6uCGVXU/aNF13AQNggxfysJ+5ZcU4nEAe+pJyVWRdiE=

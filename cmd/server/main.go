@@ -12,7 +12,6 @@ import (
 	"math/rand/v2"
 	"net/http"
 
-	mcpserver "github.com/BrunoKrugel/echo-mcp"
 	"github.com/gametimesf/open-trove/comments"
 	"github.com/gametimesf/open-trove/intake"
 	"github.com/gametimesf/open-trove/internal/config"
@@ -86,27 +85,7 @@ func main() {
 
 	registerRoutes(e, srv)
 
-	// MCP endpoint — exposes API routes as Model Context Protocol tools
-	mcp := mcpserver.NewWithConfig(e, &mcpserver.Config{
-		EnableSwaggerSchemas: true,
-	})
-	// echo-mcp identifies tools by method and path, so the comment GET and POST
-	// routes can coexist. Internal browser assets are not tools.
-	mcp.ExcludeEndpoints([]string{
-		"/healthz",
-		"/favicon.svg",
-		"/favicon.png",
-		"/apple-touch-icon.png",
-		"/api/tokens",
-		"/api/tokens/*",
-		"/swagger/*",
-		"/_trove/*",
-		"/mcp",
-		"/delete/*",
-		// Binary image upload and download don't fit MCP tool calls.
-		"/api/artifacts/:slug/preview",
-	})
-	if err := mcp.Mount("/mcp"); err != nil {
+	if err := mountMCP(e); err != nil {
 		log.Fatalf("mounting MCP server: %v", err)
 	}
 
