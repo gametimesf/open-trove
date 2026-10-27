@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.0](https://github.com/gametimesf/open-trove/compare/open-trove-v1.9.0...open-trove-v1.10.0) (2026-10-27)
+
+
+### Features
+
+* comment links open the comments sidebar on the thread ([#41](https://github.com/gametimesf/open-trove/issues/41)) ([2bf7b0f](https://github.com/gametimesf/open-trove/commit/2bf7b0ffc48b2c024603857344f52af9f7933440))
+
 ## [1.9.0](https://github.com/gametimesf/open-trove/compare/open-trove-v1.8.0...open-trove-v1.9.0) (2026-10-26)
 
 
