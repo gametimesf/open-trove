@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 
+	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
 )
@@ -48,6 +49,17 @@ func handleEvent(ctx context.Context, evt socketmode.Event, ack acker, unfurler 
 		}
 		if shared, ok := api.InnerEvent.Data.(*slackevents.LinkSharedEvent); ok && unfurler != nil {
 			unfurler.HandleLinkShared(ctx, shared)
+		}
+	case socketmode.EventTypeInteractive:
+		// Button clicks on preview prompts. Ack first, as for events.
+		if evt.Request != nil {
+			if err := ack.Ack(*evt.Request); err != nil {
+				log.Printf("WARN  slack ack failed: %v", err)
+			}
+		}
+		cb, ok := evt.Data.(slack.InteractionCallback)
+		if ok && cb.Type == slack.InteractionTypeBlockActions && unfurler != nil {
+			unfurler.HandleConsent(ctx, cb)
 		}
 	}
 }

@@ -252,8 +252,9 @@ Markdown:
   counts are added automatically.
 
 CSV previews show the header and first rows; code and text show the first
-lines; JSON shows top-level keys. Content is withheld from previews of
-flagged artifacts and in conversations that include guests.
+lines; JSON shows top-level keys. Flagged artifacts preview as title only.
+Where guests are present, or Trove can't see who's in the conversation (DMs),
+the person who shared the link is asked before a preview is posted.
 
 ### Set a preview card (optional image)
 
@@ -275,7 +276,7 @@ line; the title, summary, stats and comment details still show.
 - Re-upload to replace; DELETE the same URL to go back to the text preview.
   Overwriting the artifact keeps the card.
 - GET returns the stored image. Cards are not shown for flagged artifacts or
-  in conversations with guests.
+  for previews the sharer chose to show as title only.
 - Previews fall back in order: card image, then the tags above, then content
   Trove derives from the file.
 

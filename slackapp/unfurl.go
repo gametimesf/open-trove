@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -31,8 +32,8 @@ type Preview struct {
 
 // Reasons content is withheld from a preview.
 const (
-	HiddenFlagged = "flagged during content review"
-	hiddenGuests  = "this conversation includes guests"
+	HiddenFlagged  = "flagged during content review"
+	hiddenByChoice = "shared as title only"
 )
 
 // CommentExcerpt is a short quote from a comment.
@@ -58,6 +59,8 @@ type Unfurler struct {
 	// retryDelay is how long to wait before retrying an unfurl whose image
 	// Slack may still be processing.
 	retryDelay time.Duration
+	// respond posts to an interaction's response_url, e.g. to remove a prompt.
+	respond func(ctx context.Context, responseURL string, payload any) error
 }
 
 // NewUnfurler previews links whose host matches baseURL's host.
@@ -66,10 +69,12 @@ func NewUnfurler(api API, previews Previews, baseURL string) (*Unfurler, error) 
 	if err != nil || u.Host == "" {
 		return nil, fmt.Errorf("slack unfurls need an absolute base URL, got %q", baseURL)
 	}
-	return &Unfurler{api: api, previews: previews, host: strings.ToLower(u.Host), guests: newGuestDirectory(api), cards: newCardUploader(api), retryDelay: 2 * time.Second}, nil
+	return &Unfurler{api: api, previews: previews, host: strings.ToLower(u.Host), guests: newGuestDirectory(api), cards: newCardUploader(api), retryDelay: 2 * time.Second, respond: postResponseURL}, nil
 }
 
-// HandleLinkShared unfurls the Trove links in one shared message.
+// HandleLinkShared unfurls the Trove links in one shared message. Previews
+// post directly where everyone is a workspace member; where guests are present
+// or the bot can't see who is (DMs it isn't in), the sharer is asked first.
 func (u *Unfurler) HandleLinkShared(ctx context.Context, ev *slackevents.LinkSharedEvent) {
 	// Links still in the message composer carry a UUID instead of a message
 	// timestamp and need an unfurl ID this event type doesn't expose; skip them.
@@ -77,13 +82,31 @@ func (u *Unfurler) HandleLinkShared(ctx context.Context, ev *slackevents.LinkSha
 		log.Printf("INFO  slack unfurl skipped reason=composer channel=%s", ev.Channel)
 		return
 	}
-	if ok, reason := u.channelAllowsPreviews(ctx, ev.Channel); !ok {
-		log.Printf("INFO  slack unfurl skipped reason=%s channel=%s", reason, ev.Channel)
+	links := make([]string, 0, len(ev.Links))
+	for _, link := range ev.Links {
+		if _, ok := u.artifactSlug(link.URL); ok && !slices.Contains(links, link.URL) {
+			links = append(links, link.URL)
+		}
+	}
+	if len(links) == 0 {
 		return
 	}
-	previews := make(map[string]Preview, len(ev.Links))
-	for _, link := range ev.Links {
-		slug, ok := u.artifactSlug(link.URL)
+	switch aud := u.audience(ctx, ev.Channel); aud {
+	case audienceExternal:
+		log.Printf("INFO  slack unfurl skipped reason=externally_shared_channel channel=%s", ev.Channel)
+	case audienceMembers:
+		u.sendPreviews(ctx, ev.Channel, ev.MessageTimeStamp, links, choiceFull)
+	default:
+		u.askSharer(ctx, ev, links, aud)
+	}
+}
+
+// sendPreviews unfurls links in a posted message. choiceTitle withholds
+// content as for flagged artifacts.
+func (u *Unfurler) sendPreviews(ctx context.Context, channel, ts string, links []string, choice consentChoice) {
+	previews := make(map[string]Preview, len(links))
+	for _, link := range links {
+		slug, ok := u.artifactSlug(link)
 		if !ok {
 			continue
 		}
@@ -92,19 +115,15 @@ func (u *Unfurler) HandleLinkShared(ctx context.Context, ev *slackevents.LinkSha
 			log.Printf("INFO  slack unfurl skipped reason=no_preview slug=%s: %v", slug, err)
 			continue
 		}
-		previews[link.URL] = p
+		previews[link] = p
 	}
 	if len(previews) == 0 {
 		return
 	}
-	hasGuests, err := u.guests.hasGuests(ctx, ev.Channel)
-	if err != nil {
-		log.Printf("WARN  slack unfurl guest check failed channel=%s; hiding content: %v", ev.Channel, err)
-	}
 	withCards := 0
 	for link, p := range previews {
-		if hasGuests && p.HiddenReason == "" {
-			p.HiddenReason = hiddenGuests
+		if choice == choiceTitle && p.HiddenReason == "" {
+			p.HiddenReason = hiddenByChoice
 		}
 		if p.Card != nil && p.HiddenReason == "" {
 			id, err := u.cards.fileID(ctx, p.Card)
@@ -118,15 +137,15 @@ func (u *Unfurler) HandleLinkShared(ctx context.Context, ev *slackevents.LinkSha
 		previews[link] = p
 	}
 
-	err = u.unfurl(ctx, ev, previews)
+	err := u.unfurl(ctx, channel, ts, previews)
 	if err != nil && withCards > 0 {
 		// A just-uploaded image can take a moment to process; retry once, then
 		// fall back to text previews.
 		if sleepErr := sleepContext(ctx, u.retryDelay); sleepErr == nil {
-			err = u.unfurl(ctx, ev, previews)
+			err = u.unfurl(ctx, channel, ts, previews)
 		}
 		if err != nil {
-			log.Printf("WARN  slack unfurl with card failed channel=%s; retrying as text: %v", ev.Channel, err)
+			log.Printf("WARN  slack unfurl with card failed channel=%s; retrying as text: %v", channel, err)
 			for link, p := range previews {
 				if p.cardFileID != "" {
 					u.cards.reject(p.Card)
@@ -135,22 +154,22 @@ func (u *Unfurler) HandleLinkShared(ctx context.Context, ev *slackevents.LinkSha
 				}
 			}
 			withCards = 0
-			err = u.unfurl(ctx, ev, previews)
+			err = u.unfurl(ctx, channel, ts, previews)
 		}
 	}
 	if err != nil {
-		log.Printf("WARN  slack unfurl failed channel=%s links=%d: %v", ev.Channel, len(previews), err)
+		log.Printf("WARN  slack unfurl failed channel=%s links=%d: %v", channel, len(previews), err)
 		return
 	}
-	log.Printf("INFO  slack unfurl sent channel=%s links=%d cards=%d content_hidden=%t", ev.Channel, len(previews), withCards, hasGuests)
+	log.Printf("INFO  slack unfurl sent channel=%s links=%d cards=%d content=%s", channel, len(previews), withCards, choice)
 }
 
-func (u *Unfurler) unfurl(ctx context.Context, ev *slackevents.LinkSharedEvent, previews map[string]Preview) error {
+func (u *Unfurler) unfurl(ctx context.Context, channel, ts string, previews map[string]Preview) error {
 	unfurls := make(map[string]slack.Attachment, len(previews))
 	for link, p := range previews {
 		unfurls[link] = attachment(link, p)
 	}
-	_, _, _, err := u.api.UnfurlMessageContext(ctx, ev.Channel, ev.MessageTimeStamp, unfurls)
+	_, _, _, err := u.api.UnfurlMessageContext(ctx, channel, ts, unfurls)
 	return err
 }
 
@@ -165,17 +184,26 @@ func sleepContext(ctx context.Context, d time.Duration) error {
 	}
 }
 
-// channelAllowsPreviews refuses channels shared with other organizations, and
-// fails closed when the channel can't be checked.
-func (u *Unfurler) channelAllowsPreviews(ctx context.Context, channelID string) (bool, string) {
+// audience classifies who can read a conversation. Unknown covers DMs the bot
+// isn't in, where Slack won't say who the other people are, and failed checks.
+func (u *Unfurler) audience(ctx context.Context, channelID string) audience {
 	ch, err := u.api.GetConversationInfoContext(ctx, &slack.GetConversationInfoInput{ChannelID: channelID})
 	if err != nil {
-		return false, "channel_lookup_failed"
+		log.Printf("INFO  slack unfurl channel lookup failed channel=%s: %v", channelID, err)
+		return audienceUnknown
 	}
 	if ch.IsExtShared || ch.IsPendingExtShared {
-		return false, "externally_shared_channel"
+		return audienceExternal
 	}
-	return true, ""
+	hasGuests, err := u.guests.hasGuests(ctx, channelID)
+	if err != nil {
+		log.Printf("WARN  slack unfurl guest check failed channel=%s: %v", channelID, err)
+		return audienceUnknown
+	}
+	if hasGuests {
+		return audienceGuests
+	}
+	return audienceMembers
 }
 
 // artifactSlug returns the slug for /{slug}, /{slug}/raw and site page URLs on
