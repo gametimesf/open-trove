@@ -197,9 +197,23 @@ func (d *Dispatcher) deliver(ctx context.Context, n Notification) error {
 }
 
 func (d *Dispatcher) artifactURL(activity comments.Activity) string {
-	u := d.baseURL + "/" + url.PathEscape(activity.Slug)
-	if page := activity.Comment.Anchor.Resource; page != "" {
-		u += "?page=" + url.QueryEscape(page)
+	return CommentURL(d.baseURL, activity.Slug, activity.Comment.Anchor.Resource, activity.Comment.ThreadID)
+}
+
+// CommentURL links to a comment thread in the Trove viewer, which opens the
+// comments sidebar on that thread. resource selects a site page; threadID may
+// be empty to link to the artifact only.
+func CommentURL(baseURL, slug, resource, threadID string) string {
+	u := baseURL + "/" + url.PathEscape(slug)
+	var query []string
+	if resource != "" {
+		query = append(query, "page="+url.QueryEscape(resource))
+	}
+	if threadID != "" {
+		query = append(query, "comment="+url.QueryEscape(threadID))
+	}
+	if len(query) > 0 {
+		u += "?" + strings.Join(query, "&")
 	}
 	return u
 }

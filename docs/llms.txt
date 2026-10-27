@@ -109,6 +109,9 @@ Example:
     curl "$TROVE_BASE_URL/api/artifacts/my-report/comments" \
       -H "X-Trove-User-Email: you@example.com"
 
+Link to a thread with `/{slug}?comment={thread_id}` (add `&page={path}` for a
+site page): the viewer opens the comments sidebar on that thread.
+
 ### Create a comment thread
 POST /api/artifacts/{slug}/comments
 Content-Type: application/json

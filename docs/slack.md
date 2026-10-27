@@ -105,6 +105,10 @@ Operators should enable notifications together with, or after, enforcement.
   unfurl Slack rejects (retried once, since new files take a moment to
   process) falls back to the text preview and backs off for ten minutes.
   Cards are never uploaded for hidden previews (flagged, or guests present).
+- Links to a comment (the DM's link and the preview's newest-comment quote)
+  carry `?comment=<thread id>` (and `?page=` on sites); the viewer opens the
+  comments sidebar on that thread and scrolls to its anchor, showing resolved
+  threads when needed.
 - Direct messages between people aren't previewed: the bot can't inspect them,
   so the channel check fails closed.
 - Only links in posted messages are previewed. Links still in the message

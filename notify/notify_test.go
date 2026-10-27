@@ -146,7 +146,7 @@ func TestDispatcherDeliversReply(t *testing.T) {
 	first := n.sent[0]
 	want := Notification{
 		Kind: comments.ActivityReplyCreated, RecipientEmail: owner, ActorEmail: reviewer, RecipientIsOwner: true,
-		ArtifactTitle: "Q3 report", ArtifactURL: "https://trove.example.com/q3-report?page=pages%2Fa+b.html", Excerpt: "Looks good",
+		ArtifactTitle: "Q3 report", ArtifactURL: "https://trove.example.com/q3-report?page=pages%2Fa+b.html&comment=t1", Excerpt: "Looks good",
 	}
 	if first != want {
 		t.Fatalf("notification = %+v\nwant %+v", first, want)
@@ -242,5 +242,22 @@ func TestExcerpt(t *testing.T) {
 	}
 	if excerpt("short\n\ttext") != "short text" {
 		t.Fatalf("whitespace not collapsed: %q", excerpt("short\n\ttext"))
+	}
+}
+
+func TestCommentURL(t *testing.T) {
+	tests := []struct {
+		name, resource, thread, want string
+	}{
+		{name: "artifact only", want: "https://trove.example.com/q%2F3"},
+		{name: "thread", thread: "a b", want: "https://trove.example.com/q%2F3?comment=a+b"},
+		{name: "site page and thread", resource: "pages/x.html", thread: "t1", want: "https://trove.example.com/q%2F3?page=pages%2Fx.html&comment=t1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := CommentURL("https://trove.example.com", "q/3", tt.resource, tt.thread); got != tt.want {
+				t.Fatalf("CommentURL = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

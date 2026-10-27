@@ -261,6 +261,11 @@
   border-color: #bbf7d0;
 }
 
+.trove-comment-thread--linked {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.25);
+}
+
 .trove-comment-thread__header {
   display: flex;
   align-items: center;

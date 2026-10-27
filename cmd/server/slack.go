@@ -23,7 +23,8 @@ var errNotArtifact = errors.New("not an artifact")
 
 // artifactInfo describes stored artifacts for notifications and link previews.
 type artifactInfo struct {
-	store storage.Store
+	store   storage.Store
+	baseURL string
 }
 
 // artifactDescription is what notifications and previews know about an artifact.
@@ -132,7 +133,11 @@ func (a artifactInfo) Preview(ctx context.Context, slug string) (slackapp.Previe
 		}
 	}
 	if latest != nil {
-		p.LatestComment = &slackapp.CommentExcerpt{AuthorEmail: latest.AuthorEmail, Body: latest.Body}
+		p.LatestComment = &slackapp.CommentExcerpt{
+			AuthorEmail: latest.AuthorEmail,
+			Body:        latest.Body,
+			URL:         notify.CommentURL(a.baseURL, slug, latest.Anchor.Resource, latest.ThreadID),
+		}
 	}
 	return p, nil
 }
@@ -144,7 +149,7 @@ func startSlack(ctx context.Context, cfg config.Slack, baseURL string, store sto
 		return nil, nil
 	}
 	api := slack.New(cfg.BotToken, slack.OptionAppLevelToken(cfg.AppToken))
-	info := artifactInfo{store: store}
+	info := artifactInfo{store: store, baseURL: baseURL}
 	var opts []comments.Option
 
 	if cfg.Notifications {

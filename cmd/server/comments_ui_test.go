@@ -38,6 +38,10 @@ func TestCommentAssetsAreServed(t *testing.T) {
 				"submitForm.requestSubmit(submitButton)",
 				"addSubmitShortcut(textarea, form, submit)",
 				"addSubmitShortcut(replyBody, replyForm, replySubmit)",
+				`URLSearchParams(window.location.search).get("comment")`,
+				"trove-comment-thread--linked",
+				"That comment is no longer available.",
+				"loadThreads().then(openLinkedThread)",
 			},
 		},
 		{
