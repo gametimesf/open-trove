@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.0](https://github.com/gametimesf/open-trove/compare/open-trove-v1.11.0...open-trove-v1.12.0) (2026-10-27)
+
+
+### Features
+
+* ask the sharer before previewing where guests or unknown people can read ([#45](https://github.com/gametimesf/open-trove/issues/45)) ([a4bcb63](https://github.com/gametimesf/open-trove/commit/a4bcb638d070600dffac79d24f65d942d033ae5f))
+
 ## [1.11.0](https://github.com/gametimesf/open-trove/compare/open-trove-v1.10.0...open-trove-v1.11.0) (2026-10-27)
 
 
