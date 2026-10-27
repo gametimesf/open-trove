@@ -2,8 +2,10 @@ package slackapp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"reflect"
 	"strconv"
 	"strings"
@@ -50,6 +52,7 @@ type postCall struct {
 type unfurlCall struct {
 	channel, ts string
 	unfurls     map[string]slack.Attachment
+	values      url.Values // extra chat.unfurl parameters, e.g. user_auth_blocks
 }
 
 func (f *fakeAPI) GetUserByEmailContext(_ context.Context, email string) (*slack.User, error) {
@@ -111,10 +114,14 @@ func (f *fakeAPI) GetUsersInConversationContext(_ context.Context, params *slack
 	return f.members[page], next, nil
 }
 
-func (f *fakeAPI) UnfurlMessageContext(_ context.Context, channelID, ts string, unfurls map[string]slack.Attachment, _ ...slack.MsgOption) (string, string, string, error) {
+func (f *fakeAPI) UnfurlMessageContext(_ context.Context, channelID, ts string, unfurls map[string]slack.Attachment, options ...slack.MsgOption) (string, string, string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.unfurlCalls = append(f.unfurlCalls, unfurlCall{channel: channelID, ts: ts, unfurls: unfurls})
+	_, values, err := slack.UnsafeApplyMsgOptions("token", channelID, "https://slack.com/api/", options...)
+	if err != nil {
+		return "", "", "", err
+	}
+	f.unfurlCalls = append(f.unfurlCalls, unfurlCall{channel: channelID, ts: ts, unfurls: unfurls, values: values})
 	if len(f.unfurlErrs) > 0 {
 		err := f.unfurlErrs[0]
 		f.unfurlErrs = f.unfurlErrs[1:]
@@ -290,10 +297,6 @@ func TestUnfurler(t *testing.T) {
 			links:   links("https://trove.example.com/q3-plan"),
 		},
 		{
-			name: "fails closed when the channel can't be checked", channelErr: errors.New("missing_scope"), ts: "1717000000.000100",
-			links: links("https://trove.example.com/q3-plan"),
-		},
-		{
 			name: "skips composer previews", channel: &slack.Channel{}, ts: "6a1b2c3d-0000-4000-8000-000000000000",
 			links: links("https://trove.example.com/q3-plan"),
 		},
@@ -438,41 +441,164 @@ func TestServeAcksAndRoutesLinkShared(t *testing.T) {
 	}
 }
 
-func TestUnfurlerHidesContentWhenGuestsPresent(t *testing.T) {
+// promptOf returns the consent request and prompt text from an unfurl call
+// that asked the sharer, or ok=false for a normal unfurl.
+func promptOf(t *testing.T, call unfurlCall) (consentRequest, string, bool) {
+	t.Helper()
+	if call.values.Get("user_auth_required") != "true" {
+		return consentRequest{}, "", false
+	}
+	var blocks []map[string]any
+	if err := json.Unmarshal([]byte(call.values.Get("user_auth_blocks")), &blocks); err != nil || len(blocks) != 2 {
+		t.Fatalf("user_auth_blocks = %s (%v)", call.values.Get("user_auth_blocks"), err)
+	}
+	text := blocks[0]["text"].(map[string]any)["text"].(string)
+	elements := blocks[1]["elements"].([]any)
+	var ids []string
+	var req consentRequest
+	for _, el := range elements {
+		b := el.(map[string]any)
+		ids = append(ids, b["action_id"].(string))
+		if err := json.Unmarshal([]byte(b["value"].(string)), &req); err != nil {
+			t.Fatalf("button value: %v", err)
+		}
+	}
+	if !reflect.DeepEqual(ids, []string{"trove_unfurl_full", "trove_unfurl_title", "trove_unfurl_none"}) {
+		t.Fatalf("buttons = %v", ids)
+	}
+	return req, text, true
+}
+
+func TestUnfurlerAsksSharerWhenAudienceIsUncertain(t *testing.T) {
 	const link = "https://trove.example.com/q3-plan"
 	previews := fakePreviews{"q3-plan": {Summary: preview.Summary{Kind: preview.KindHTML, Title: "Q3", Description: "Internal numbers"}}}
 	users := []slack.User{{ID: "U1"}, {ID: "G1", IsRestricted: true}, {ID: "G2", IsUltraRestricted: true}, {ID: "G3", IsRestricted: true, Deleted: true}}
 	tests := []struct {
 		name       string
+		channel    *slack.Channel
+		channelErr error
 		members    [][]string
 		usersErr   error
 		membersErr error
-		wantHidden bool
+		wantPrompt string // substring of the prompt; "" means a direct preview
+		wantNone   bool   // nothing posted at all
 	}{
-		{name: "members only", members: [][]string{{"U1", "G3"}}},
-		{name: "multi-channel guest", members: [][]string{{"U1", "G1"}}, wantHidden: true},
-		{name: "single-channel guest on a later page", members: [][]string{{"U1"}, {"G2"}}, wantHidden: true},
-		{name: "user list unavailable", members: [][]string{{"U1"}}, usersErr: errors.New("ratelimited"), wantHidden: true},
-		{name: "members unavailable", membersErr: errors.New("missing_scope"), wantHidden: true},
-		{name: "too many members to check", members: make([][]string, maxMemberPages+1), wantHidden: true},
+		{name: "members only: preview directly", channel: &slack.Channel{}, members: [][]string{{"U1", "G3"}}},
+		{name: "multi-channel guest", channel: &slack.Channel{}, members: [][]string{{"U1", "G1"}}, wantPrompt: "includes guests"},
+		{name: "single-channel guest on a later page", channel: &slack.Channel{}, members: [][]string{{"U1"}, {"G2"}}, wantPrompt: "includes guests"},
+		{name: "DM the bot isn't in", channelErr: errors.New("channel_not_found"), wantPrompt: "can't see who's in this conversation"},
+		{name: "user list unavailable", channel: &slack.Channel{}, members: [][]string{{"U1"}}, usersErr: errors.New("ratelimited"), wantPrompt: "can't see who's in"},
+		{name: "members unavailable", channel: &slack.Channel{}, membersErr: errors.New("missing_scope"), wantPrompt: "can't see who's in"},
+		{name: "too many members to check", channel: &slack.Channel{}, members: make([][]string, maxMemberPages+1), wantPrompt: "can't see who's in"},
+		{name: "Slack Connect: never", channel: &slack.Channel{GroupConversation: slack.GroupConversation{Conversation: slack.Conversation{IsExtShared: true}}}, wantNone: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			api := &fakeAPI{channel: &slack.Channel{}, allUsers: users, usersErr: tt.usersErr, members: tt.members, membersErr: tt.membersErr}
+			api := &fakeAPI{channel: tt.channel, channelErr: tt.channelErr, allUsers: users, usersErr: tt.usersErr, members: tt.members, membersErr: tt.membersErr}
 			u, err := NewUnfurler(api, previews, "https://trove.example.com")
 			if err != nil {
 				t.Fatal(err)
 			}
-			u.HandleLinkShared(context.Background(), &slackevents.LinkSharedEvent{Channel: "C1", MessageTimeStamp: "1717000000.000100", Links: []slackevents.SharedLinks{{URL: link}}})
+			u.HandleLinkShared(context.Background(), &slackevents.LinkSharedEvent{
+				Channel: "D1", User: "U9", MessageTimeStamp: "1717000000.000100",
+				Links: []slackevents.SharedLinks{{URL: link}, {URL: link}, {URL: "https://evil.example.com/q3-plan"}},
+			})
+			if tt.wantNone {
+				if len(api.unfurlCalls) != 0 {
+					t.Fatalf("unexpected unfurl: %+v", api.unfurlCalls)
+				}
+				return
+			}
 			if len(api.unfurlCalls) != 1 {
 				t.Fatalf("unfurl calls = %d, want 1", len(api.unfurlCalls))
 			}
-			texts := strings.Join(blockTexts(api.unfurlCalls[0].unfurls[link]), "\n")
-			hidden := strings.Contains(texts, "Preview content hidden: this conversation includes guests")
-			if hidden != tt.wantHidden || strings.Contains(texts, "Internal numbers") == tt.wantHidden {
-				t.Fatalf("hidden = %t, want %t:\n%s", hidden, tt.wantHidden, texts)
+			call := api.unfurlCalls[0]
+			req, text, prompted := promptOf(t, call)
+			if tt.wantPrompt == "" {
+				if prompted || !strings.Contains(strings.Join(blockTexts(call.unfurls[link]), "\n"), "Internal numbers") {
+					t.Fatalf("want a direct preview, got prompt=%t %+v", prompted, call)
+				}
+				return
+			}
+			if !prompted || !strings.Contains(text, tt.wantPrompt) || len(call.unfurls) != 0 {
+				t.Fatalf("want prompt %q, got prompt=%t text=%q unfurls=%d", tt.wantPrompt, prompted, text, len(call.unfurls))
+			}
+			want := consentRequest{Channel: "D1", TS: "1717000000.000100", User: "U9", Links: []string{link}}
+			if !reflect.DeepEqual(req, want) {
+				t.Fatalf("consent request = %+v, want %+v", req, want)
 			}
 		})
+	}
+}
+
+func TestHandleConsent(t *testing.T) {
+	const link = "https://trove.example.com/q3-plan"
+	previews := fakePreviews{"q3-plan": {Summary: preview.Summary{Kind: preview.KindHTML, Title: "Q3", Description: "Internal numbers"}}}
+	value := func(user string, links ...string) string {
+		b, _ := json.Marshal(consentRequest{Channel: "D1", TS: "1717000000.000100", User: user, Links: links})
+		return string(b)
+	}
+	tests := []struct {
+		name        string
+		actionID    string
+		value       string
+		clicker     string
+		wantUnfurl  bool
+		wantContent bool
+		wantCleanup bool
+	}{
+		{name: "show preview", actionID: "trove_unfurl_full", value: value("U9", link), clicker: "U9", wantUnfurl: true, wantContent: true, wantCleanup: true},
+		{name: "title only", actionID: "trove_unfurl_title", value: value("U9", link), clicker: "U9", wantUnfurl: true, wantCleanup: true},
+		{name: "don't preview", actionID: "trove_unfurl_none", value: value("U9", link), clicker: "U9", wantCleanup: true},
+		{name: "someone other than the sharer", actionID: "trove_unfurl_full", value: value("U9", link), clicker: "U7"},
+		{name: "foreign links are dropped", actionID: "trove_unfurl_full", value: value("U9", "https://evil.example.com/q3-plan"), clicker: "U9", wantCleanup: true},
+		{name: "garbled value", actionID: "trove_unfurl_full", value: "{", clicker: "U9"},
+		{name: "other app's button", actionID: "something_else", value: value("U9", link), clicker: "U9"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			api := &fakeAPI{}
+			u, err := NewUnfurler(api, previews, "https://trove.example.com")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var cleaned []string
+			u.respond = func(_ context.Context, responseURL string, payload any) error {
+				if !reflect.DeepEqual(payload, map[string]any{"delete_original": true}) {
+					t.Errorf("payload = %v", payload)
+				}
+				cleaned = append(cleaned, responseURL)
+				return nil
+			}
+			cb := slack.InteractionCallback{Type: slack.InteractionTypeBlockActions, User: slack.User{ID: tt.clicker}, ResponseURL: "https://hooks.slack.com/actions/x"}
+			cb.ActionCallback.BlockActions = []*slack.BlockAction{{ActionID: tt.actionID, Value: tt.value}}
+			u.HandleConsent(context.Background(), cb)
+
+			if got := len(api.unfurlCalls) == 1; got != tt.wantUnfurl {
+				t.Fatalf("unfurl calls = %d, want unfurl %t", len(api.unfurlCalls), tt.wantUnfurl)
+			}
+			if tt.wantUnfurl {
+				call := api.unfurlCalls[0]
+				texts := strings.Join(blockTexts(call.unfurls[link]), "\n")
+				if call.channel != "D1" || call.ts != "1717000000.000100" || strings.Contains(texts, "Internal numbers") != tt.wantContent {
+					t.Fatalf("unfurl = %s %s:\n%s", call.channel, call.ts, texts)
+				}
+				if !tt.wantContent && !strings.Contains(texts, "shared as title only") {
+					t.Fatalf("title-only preview should say why:\n%s", texts)
+				}
+			}
+			if (len(cleaned) == 1) != tt.wantCleanup {
+				t.Fatalf("prompt cleanup = %v, want %t", cleaned, tt.wantCleanup)
+			}
+		})
+	}
+}
+
+func TestPostResponseURLOnlyTalksToSlack(t *testing.T) {
+	for _, bad := range []string{"http://hooks.slack.com/x", "https://evil.example.com/x", "https://slack.com.evil.example/x", "::"} {
+		if err := postResponseURL(context.Background(), bad, map[string]any{}); err == nil {
+			t.Errorf("postResponseURL(%q) succeeded", bad)
+		}
 	}
 }
 
@@ -597,5 +723,22 @@ func TestCardUploaderCachesAndBacksOff(t *testing.T) {
 	now = now.Add(cardFailureTTL)
 	if id, err := u.fileID(ctx, card); err != nil || id != "F2" {
 		t.Fatalf("fileID after back-off = %q, %v", id, err)
+	}
+}
+
+func TestServeRoutesConsentClicks(t *testing.T) {
+	api := &fakeAPI{}
+	u, _ := NewUnfurler(api, fakePreviews{"q3-plan": {Summary: preview.Summary{Title: "Q3"}}}, "https://trove.example.com")
+	u.respond = func(context.Context, string, any) error { return nil }
+	value, _ := json.Marshal(consentRequest{Channel: "D1", TS: "1717000000.000100", User: "U9", Links: []string{"https://trove.example.com/q3-plan"}})
+	cb := slack.InteractionCallback{Type: slack.InteractionTypeBlockActions, User: slack.User{ID: "U9"}}
+	cb.ActionCallback.BlockActions = []*slack.BlockAction{{ActionID: "trove_unfurl_full", Value: string(value)}}
+	events := make(chan socketmode.Event, 1)
+	events <- socketmode.Event{Type: socketmode.EventTypeInteractive, Request: &socketmode.Request{EnvelopeID: "env-2"}, Data: cb}
+	close(events)
+	ack := &fakeAcker{}
+	Serve(context.Background(), events, ack, u)
+	if len(ack.acked) != 1 || ack.acked[0] != "env-2" || len(api.unfurlCalls) != 1 {
+		t.Fatalf("acked = %v, unfurl calls = %d", ack.acked, len(api.unfurlCalls))
 	}
 }

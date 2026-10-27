@@ -89,28 +89,16 @@ Operators should enable notifications together with, or after, enforcement.
   excerpt (CSV head, first lines of code, JSON keys), plus type, uploader, open
   comment count and the newest open comment. See "Make links preview well" in
   `llms.txt` for the authoring conventions.
-- Skip previews in channels shared with other organizations (Slack Connect). If
-  the channel can't be checked, skip — fail closed.
-- Withhold content (title and metadata only) when the conversation includes
-  guests (single- or multi-channel), or the artifact was flagged by content
-  review. Guest checks use the workspace user list (cached for an hour) and
-  channel membership (cached for ten minutes); a failed check withholds content.
-- Preview cards: an author can store a PNG or JPEG for an artifact
-  (`PUT /api/artifacts/{slug}/preview`). When present, the preview shows it in
-  place of the excerpt and contents line. Precedence is card image, then
-  author tags (meta tags or frontmatter), then content Trove derives itself;
-  each step falls back to the next.
-- Cards are uploaded to Slack once per image (`files:write`), without sharing
-  them to any conversation, and referenced by file ID. A failed upload or an
-  unfurl Slack rejects (retried once, since new files take a moment to
-  process) falls back to the text preview and backs off for ten minutes.
-  Cards are never uploaded for hidden previews (flagged, or guests present).
-- Links to a comment (the DM's link and the preview's newest-comment quote)
-  carry `?comment=<thread id>` (and `?page=` on sites); the viewer opens the
-  comments sidebar on that thread and scrolls to its anchor, showing resolved
-  threads when needed.
-- Direct messages between people aren't previewed: the bot can't inspect them,
-  so the channel check fails closed.
+- Who can read the conversation decides what happens:
+  - Workspace members only: post the preview.
+  - Guests present (single- or multi-channel), or the bot can't tell who's
+    there (DMs and group DMs it isn't in, or a failed check): privately ask
+    the person who shared the link, using Slack's unfurl prompt
+    (`user_auth_blocks`): **Show preview**, **Title only** or **Don't
+    preview**. Clicks arrive over Socket Mode (interactivity on, no request
+    URL); only the sharer's answer counts, and the prompt is removed after.
+  - Shared with another organization (Slack Connect channels): never.
+- Flagged artifacts always preview as title and metadata only.
 - Only links in posted messages are previewed. Links still in the message
   composer need an unfurl ID that the Slack library's event type doesn't expose
   yet, so they're skipped.
@@ -119,8 +107,11 @@ Operators should enable notifications together with, or after, enforcement.
 
 Comment excerpts, artifact titles and preview excerpts are internal business
 data. They go only to individual members of the workspace (DMs) and to previews
-in channels that aren't shared externally and have no guests. Flagged artifacts
-never contribute content to a preview. Preview card images are stored in Slack
+in conversations that aren't shared with other organizations: automatically
+where only workspace members can read them, and otherwise only after the
+person who shared the link chooses to (the prompt warns when guests are
+present or membership can't be checked). Flagged artifacts never contribute
+content to a preview. Preview card images are stored in Slack
 as files owned by the app and not shared to any conversation.
 
 ## Observability
