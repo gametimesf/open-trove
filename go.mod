@@ -78,3 +78,5 @@ require (
 	golang.org/x/tools v0.49.0 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
+
+replace github.com/BrunoKrugel/echo-mcp => github.com/gametimesf/echo-mcp v0.1.12-gt.1
