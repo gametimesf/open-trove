@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.0](https://github.com/gametimesf/open-trove/compare/open-trove-v1.10.0...open-trove-v1.11.0) (2026-10-27)
+
+
+### Features
+
+* MCP tool calls carry the caller's verified identity ([#43](https://github.com/gametimesf/open-trove/issues/43)) ([c08f511](https://github.com/gametimesf/open-trove/commit/c08f511daf443e51aa42b7c5abb568dbbb15f12f))
+
 ## [1.10.0](https://github.com/gametimesf/open-trove/compare/open-trove-v1.9.0...open-trove-v1.10.0) (2026-10-27)
 
 
