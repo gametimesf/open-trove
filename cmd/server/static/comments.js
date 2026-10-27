@@ -30,6 +30,13 @@
   let scheduled = false;
   const attachedDocuments = new WeakSet();
   const collapsedThreads = new Set();
+  // ?comment=<thread id> deep links (from Slack notifications and previews)
+  // open the sidebar on that thread once.
+  const linkedThreadID = new URLSearchParams(window.location.search).get("comment") || "";
+  let highlightedThread = "";
+  let linkHandled = false;
+  // Site pages report their resource after the frame loads; resolve the link then.
+  const siteViewer = !!document.getElementById("site-frame");
 
   function resourcePath() {
     return String(body.dataset.troveResource || "").replace(/^\/+/, "");
@@ -372,7 +379,7 @@
     });
   }
 
-  function openComments() {
+  function openComments(options) {
     active = true;
     body.classList.add("trove-comments-open", "trove-comments-mode");
     toggle.setAttribute("aria-expanded", "true");
@@ -381,7 +388,7 @@
     renderTarget();
     renderBoxes();
     window.setTimeout(scheduleBoxes, 220);
-    textarea.focus();
+    if (!options || options.focusInput !== false) textarea.focus();
   }
 
   function closeComments() {
@@ -515,7 +522,9 @@
 
     const item = document.createElement("li");
     item.className = "trove-comment-thread";
+    item.dataset.threadId = root.id;
     if (resolved) item.classList.add("trove-comment-thread--resolved");
+    if (root.id === highlightedThread) item.classList.add("trove-comment-thread--linked");
     item.addEventListener("click", event => {
       if (event.target.closest && event.target.closest("button, a, input, textarea, select, form")) return;
       focusComment(root);
@@ -667,6 +676,51 @@
     }
   }
 
+  const findThread = id => threads.find(thread => thread.root && thread.root.id === id);
+
+  // whenContentReady runs fn once the artifact iframe (if any) has loaded, so
+  // element and text anchors can be found.
+  function whenContentReady(fn) {
+    const frame = document.querySelector("#trove-content iframe");
+    let ready = true;
+    try {
+      ready = !frame || !frame.contentDocument || frame.contentDocument.readyState === "complete";
+    } catch (_error) {}
+    if (ready) fn();
+    else frame.addEventListener("load", fn, {once: true});
+  }
+
+  async function openLinkedThread() {
+    if (!linkedThreadID || linkHandled) return;
+    linkHandled = true;
+    let thread = findThread(linkedThreadID);
+    if (!thread && showResolved && !showResolved.checked) {
+      // Resolution notifications link to threads that are no longer open.
+      showResolved.checked = true;
+      await loadThreads();
+      thread = findThread(linkedThreadID);
+    }
+    openComments({focusInput: false});
+    if (!thread) {
+      setStatus("That comment is no longer available.", "error");
+      return;
+    }
+    highlightedThread = linkedThreadID;
+    collapsedThreads.delete(linkedThreadID);
+    renderThreads();
+    const item = list.querySelector('[data-thread-id="' + cssEscape(linkedThreadID) + '"]');
+    if (item) item.scrollIntoView({block: "nearest"});
+    whenContentReady(() => {
+      // Markdown, CSV and DOCX render after load; retry once before giving up.
+      if (!focusComment(thread.root)) {
+        window.setTimeout(() => {
+          setStatus("", "");
+          focusComment(thread.root);
+        }, 800);
+      }
+    });
+  }
+
   function documentForAnchor() {
     const frame = document.querySelector("#trove-content iframe");
     if (frame) {
@@ -734,15 +788,15 @@
     const anchor = comment.anchor || {type: "file"};
     if (anchor.type === "file") {
       content.scrollTo({top: 0, behavior: "smooth"});
-      return;
+      return true;
     }
     const doc = documentForAnchor();
-    if (!doc) return;
+    if (!doc) return false;
     if (anchor.type === "text") {
       const range = rangeForQuote(anchor, doc);
       if (!range) {
         setStatus("That text is not present in this version.", "error");
-        return;
+        return false;
       }
       currentTarget = {range: range, doc: doc};
       const selection = doc.getSelection();
@@ -750,16 +804,17 @@
       selection.addRange(range);
       range.startContainer.parentElement?.scrollIntoView({behavior: "smooth", block: "center"});
       renderBoxes();
-      return;
+      return true;
     }
     const element = elementForAnchor(anchor, doc);
     if (!element) {
       setStatus("That element is not present in this version.", "error");
-      return;
+      return false;
     }
     currentTarget = {element: element, doc: doc};
     element.scrollIntoView({behavior: "smooth", block: "center"});
     renderBoxes();
+    return true;
   }
 
   form.addEventListener("submit", async event => {
@@ -804,7 +859,7 @@
   window.addEventListener("scroll", scheduleBoxes, true);
   window.addEventListener("trove:resource-change", () => {
     selectFile();
-    loadThreads();
+    loadThreads().then(openLinkedThread);
     attachFrames();
   });
   document.addEventListener("keydown", event => {
@@ -813,5 +868,7 @@
 
   attachFrames();
   renderTarget();
-  loadThreads();
+  loadThreads().then(() => {
+    if (!siteViewer) openLinkedThread();
+  });
 })();

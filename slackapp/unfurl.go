@@ -39,6 +39,7 @@ const (
 type CommentExcerpt struct {
 	AuthorEmail string
 	Body        string
+	URL         string // opens the thread in Trove's comments sidebar
 }
 
 // Previews looks up preview metadata for an artifact slug. Return an error for
@@ -259,7 +260,11 @@ func attachment(link string, p Preview) slack.Attachment {
 	case hidden:
 		blocks = append(blocks, contextLine(":lock: Preview content hidden: "+escape(p.HiddenReason)))
 	case p.LatestComment != nil && p.LatestComment.Body != "":
-		quote := fmt.Sprintf(":speech_balloon: “%s” — %s", escape(excerpt(p.LatestComment.Body, commentExcerptRunes)), escape(p.LatestComment.AuthorEmail))
+		text := "“" + escape(excerpt(p.LatestComment.Body, commentExcerptRunes)) + "”"
+		if p.LatestComment.URL != "" {
+			text = "<" + p.LatestComment.URL + "|" + strings.ReplaceAll(text, "|", "¦") + ">"
+		}
+		quote := ":speech_balloon: " + text + " — " + escape(p.LatestComment.AuthorEmail)
 		blocks = append(blocks, contextLine(quote))
 	}
 	return slack.Attachment{Color: accentColor, Blocks: slack.Blocks{BlockSet: blocks}}

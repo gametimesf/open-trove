@@ -358,7 +358,7 @@ func TestPreviewAttachmentContent(t *testing.T) {
 			Snippet:  "a ``` b <c>",
 		},
 		OwnerEmail: "owner@example.com", OpenThreads: 2,
-		LatestComment: &CommentExcerpt{AuthorEmail: "pat@example.com", Body: "Can we   split <this> section?"},
+		LatestComment: &CommentExcerpt{AuthorEmail: "pat@example.com", Body: "Can we   split <this> | section?", URL: "https://trove.example.com/q3-plan?comment=t1"},
 	}
 	tests := []struct {
 		name string
@@ -374,7 +374,7 @@ func TestPreviewAttachmentContent(t *testing.T) {
 				"```a `\u200b`` b &lt;c&gt;```",
 				"context:*Contents:* Summary · Risks &amp; mitigations",
 				"context:Markdown · 4 min read · uploaded by owner@example.com · 2 open comment threads",
-				"context::speech_balloon: “Can we split &lt;this&gt; section?” — pat@example.com",
+				"context::speech_balloon: <https://trove.example.com/q3-plan?comment=t1|“Can we split &lt;this&gt; ¦ section?”> — pat@example.com",
 			},
 		},
 		{

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -62,6 +63,10 @@ func TestCommentOverHTTPNotifiesOwner(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create comment status = %d: %s", rec.Code, rec.Body.String())
 	}
+	var created comments.Comment
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
 
 	deadline := time.Now().Add(2 * time.Second)
 	for len(notifier.snapshot()) == 0 && time.Now().Before(deadline) {
@@ -73,7 +78,7 @@ func TestCommentOverHTTPNotifiesOwner(t *testing.T) {
 	}
 	want := notify.Notification{
 		Kind: comments.ActivityThreadCreated, RecipientEmail: "owner@example.com", ActorEmail: "reviewer@example.com",
-		RecipientIsOwner: true, ArtifactTitle: "q3-plan.html", ArtifactURL: "https://trove.example.com/q3-plan",
+		RecipientIsOwner: true, ArtifactTitle: "q3-plan.html", ArtifactURL: "https://trove.example.com/q3-plan?comment=" + created.ThreadID,
 		Excerpt: "Can we tighten the timeline?",
 	}
 	if sent[0] != want {
@@ -119,7 +124,7 @@ func TestArtifactInfoPreview(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	info := artifactInfo{store: store}
+	info := artifactInfo{store: store, baseURL: "https://trove.example.com"}
 
 	tests := []struct {
 		slug string
@@ -133,7 +138,7 @@ func TestArtifactInfoPreview(t *testing.T) {
 					Sections: []string{"Risks"}, Facts: []string{"1 min read"},
 				},
 				OwnerEmail: "owner@example.com", OpenThreads: 2,
-				LatestComment: &slackapp.CommentExcerpt{AuthorEmail: "z@example.com", Body: "newest open thread"},
+				LatestComment: &slackapp.CommentExcerpt{AuthorEmail: "z@example.com", Body: "newest open thread", URL: "https://trove.example.com/doc?comment=d"},
 				Card:          &card,
 			},
 		},
