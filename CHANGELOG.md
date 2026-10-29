@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.13.0](https://github.com/gametimesf/open-trove/compare/open-trove-v1.12.0...open-trove-v1.13.0) (2026-10-29)
+
+
+### Features
+
+* artifact versions and conditional overwrite ([#47](https://github.com/gametimesf/open-trove/issues/47)) ([77cb77d](https://github.com/gametimesf/open-trove/commit/77cb77daf6e134ca0a16cde42c967b9ca88bc631))
+* upload hints for link previews and outdated clients ([#50](https://github.com/gametimesf/open-trove/issues/50)) ([98c1891](https://github.com/gametimesf/open-trove/commit/98c1891f0d9cfe1f5ce38990284c5f975365b3f1))
+
+
+### Bug Fixes
+
+* **deps:** bump github.com/labstack/echo/v4 to v4.16.1 ([#51](https://github.com/gametimesf/open-trove/issues/51)) ([7c79bd2](https://github.com/gametimesf/open-trove/commit/7c79bd2d146d317e41a2c50a86ae505044435188))
+* **deps:** bump golang.org/x/net to v0.62.0 ([#48](https://github.com/gametimesf/open-trove/issues/48)) ([6ff706f](https://github.com/gametimesf/open-trove/commit/6ff706f462c6db9e548a5e1b40cbb28570bd6b5b))
+
 ## [1.12.0](https://github.com/gametimesf/open-trove/compare/open-trove-v1.11.0...open-trove-v1.12.0) (2026-10-27)
 
 
