@@ -129,6 +129,12 @@
                         "description": "Resolution filter: open, include, or only",
                         "name": "resolved",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Set to all to list threads on every page of a multi-page site",
+                        "name": "pages",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -1228,6 +1234,10 @@
         "comments.Anchor": {
             "type": "object",
             "properties": {
+                "container": {
+                    "description": "Container is the id of the nearest element around the anchor that the\npage can navigate to with #id (a slide, tab or section). The viewer\nnavigates there first so hidden panels are shown.",
+                    "type": "string"
+                },
                 "label": {
                     "type": "string"
                 },

@@ -161,6 +161,12 @@ definitions:
     type: object
   comments.Anchor:
     properties:
+      container:
+        description: |-
+          Container is the id of the nearest element around the anchor that the
+          page can navigate to with #id (a slide, tab or section). The viewer
+          navigates there first so hidden panels are shown.
+        type: string
       label:
         type: string
       quote:
@@ -446,6 +452,10 @@ paths:
       - description: 'Resolution filter: open, include, or only'
         in: query
         name: resolved
+        type: string
+      - description: Set to all to list threads on every page of a multi-page site
+        in: query
+        name: pages
         type: string
       produces:
       - application/json

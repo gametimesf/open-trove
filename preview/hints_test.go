@@ -44,6 +44,21 @@ func TestHints(t *testing.T) {
 			doc:  "# Plan\n\nText.\n",
 			want: []string{HintDescription, HintStats},
 		},
+		{
+			name: "slides without #id handling", contentType: "text/html", filename: "deck.html", hasCard: true,
+			doc:  `<title>Deck</title><meta name="description" content="x"><meta name="trove:stat" content="A: 1"><div class="slide active">1</div><div class="slide">2</div>`,
+			want: []string{HintNavigation},
+		},
+		{
+			name: "slides that handle #id", contentType: "text/html", filename: "deck.html", hasCard: true,
+			doc:  `<title>Deck</title><meta name="description" content="x"><meta name="trove:stat" content="A: 1"><div class="slide">1</div><div class="slide">2</div><script>addEventListener("hashchange", go)</script>`,
+			want: []string{},
+		},
+		{
+			name: "tab panels without #id handling", contentType: "text/html", filename: "tabs.html", hasCard: true,
+			doc:  `<title>T</title><meta name="description" content="x"><meta name="trove:stat" content="A: 1"><div role="tabpanel">a</div>`,
+			want: []string{HintNavigation},
+		},
 		{name: "CSV gets no hints", contentType: "text/csv", filename: "x.csv", doc: "a,b\n1,2\n"},
 		{name: "images get no hints", contentType: "image/png", filename: "x.png", doc: "\x89PNG"},
 	}

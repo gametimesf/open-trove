@@ -2,6 +2,7 @@ package preview
 
 import (
 	"bytes"
+	"slices"
 	"strings"
 
 	"golang.org/x/net/html"
@@ -38,6 +39,8 @@ func scanHTML(doc []byte) (Summary, Authored) {
 		title, ogTitle, h1     string
 		metaDesc, ogDesc, para string
 		skipDepth, chromeDepth int
+		slides, tabPanels      int  // panels shown one at a time
+		hashNav                bool // a script listens for "hashchange"
 		capturing              atom.Atom
 		captureBuf             strings.Builder
 	)
@@ -48,6 +51,19 @@ func scanHTML(doc []byte) (Summary, Authored) {
 			break
 		}
 		tok := z.Token()
+		if tt == html.StartTagToken || tt == html.SelfClosingTagToken {
+			for _, a := range tok.Attr {
+				switch {
+				case a.Key == "class" && slices.Contains(strings.Fields(a.Val), "slide"):
+					slides++
+				case a.Key == "role" && a.Val == "tabpanel":
+					tabPanels++
+				}
+			}
+		}
+		if tt == html.TextToken && skipDepth > 0 && strings.Contains(tok.Data, "hashchange") {
+			hashNav = true
+		}
 		switch tt {
 		case html.StartTagToken, html.SelfClosingTagToken:
 			switch {
@@ -108,9 +124,11 @@ func scanHTML(doc []byte) (Summary, Authored) {
 	s.Title = firstNonEmpty(ogTitle, title, h1)
 	s.Description = firstNonEmpty(metaDesc, ogDesc, para)
 	return s, Authored{
-		Title:       firstNonEmpty(ogTitle, title) != "",
-		Description: firstNonEmpty(metaDesc, ogDesc) != "",
-		Stats:       len(s.Stats),
+		Title:        firstNonEmpty(ogTitle, title) != "",
+		Description:  firstNonEmpty(metaDesc, ogDesc) != "",
+		Stats:        len(s.Stats),
+		HiddenPanels: slides >= 2 || tabPanels > 0,
+		HashNav:      hashNav,
 	}
 }
 

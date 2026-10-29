@@ -3,6 +3,7 @@ package comments
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -234,6 +235,7 @@ func TestServiceCreateValidation(t *testing.T) {
 		{name: "valid anchor type", slug: "report", email: "a@example.com", input: CreateInput{Body: "body", Anchor: Anchor{Type: "region"}}},
 		{name: "element anchor needs target", slug: "report", email: "a@example.com", input: CreateInput{Body: "body", Anchor: Anchor{Type: AnchorElement}}},
 		{name: "text anchor needs quote", slug: "report", email: "a@example.com", input: CreateInput{Body: "body", Anchor: Anchor{Type: AnchorText}}},
+		{name: "container too long", slug: "report", email: "a@example.com", input: CreateInput{Body: "body", Anchor: Anchor{Type: AnchorElement, Selector: "#x", Container: strings.Repeat("c", maxAnchorLabelLength+1)}}},
 	}
 
 	for _, tt := range tests {
@@ -299,5 +301,28 @@ func TestServiceReportsActivityAfterSuccessfulWrites(t *testing.T) {
 		if got.Kind != w.kind || got.ActorEmail != w.actor || got.Slug != "report" || got.Comment.ThreadID != root.ID {
 			t.Errorf("activity %d = %+v, want kind %s actor %s", i, got, w.kind, w.actor)
 		}
+	}
+}
+
+func TestServiceKeepsContainerAndListsAllPages(t *testing.T) {
+	repo := &repositoryStub{}
+	service := deterministicService(repo)
+	ctx := context.Background()
+	if _, err := service.Create(ctx, "site", "a@example.com", "v1", CreateInput{Body: "on pricing", Anchor: Anchor{Type: AnchorElement, Resource: "pricing.html", Selector: "#tiers h2", Container: "  tiers  "}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Create(ctx, "site", "a@example.com", "v1", CreateInput{Body: "on home", Anchor: Anchor{Type: AnchorText, Resource: "index.html", Quote: TextQuote{Exact: "Home"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := repo.items[0].Anchor.Container; got != "tiers" {
+		t.Fatalf("container = %q, want trimmed %q", got, "tiers")
+	}
+	page, err := service.List(ctx, "site", "index.html", ResolutionOpen)
+	if err != nil || len(page) != 1 {
+		t.Fatalf("one page = %d threads, %v", len(page), err)
+	}
+	all, err := service.List(ctx, "site", AllResources, ResolutionOpen)
+	if err != nil || len(all) != 2 {
+		t.Fatalf("all pages = %d threads, %v", len(all), err)
 	}
 }

@@ -258,7 +258,14 @@ var viewerTemplate = template.Must(template.New("viewer").Parse(`<!DOCTYPE html>
 <div class="trove-workspace">
 <div class="content" id="trove-content">
 {{if eq .ViewMode "iframe"}}
-  <iframe src="{{.RawURL}}" sandbox="allow-scripts allow-popups allow-same-origin allow-top-navigation-by-user-activation"></iframe>
+  <iframe id="doc-frame" src="{{.RawURL}}" sandbox="allow-scripts allow-popups allow-same-origin allow-top-navigation-by-user-activation"></iframe>
+  <script>
+  // Deep links: /slug#id opens the document at #id (see "Make pages navigable").
+  (function() {
+    var frame = document.getElementById('doc-frame');
+    if (window.location.hash) frame.src = frame.getAttribute('src') + window.location.hash;
+  })();
+  </script>
 {{else if eq .ViewMode "image"}}
   <img src="{{.RawURL}}" alt="{{.Filename}}">
 {{else if eq .ViewMode "video"}}
@@ -400,6 +407,15 @@ var viewerTemplate = template.Must(template.New("viewer").Parse(`<!DOCTYPE html>
     var escaped = token.text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     return '<pre><code class="language-' + (token.lang || '') + '">' + escaped + '</code></pre>';
   };
+  // Heading ids make Markdown sections linkable (#id), like HTML pages.
+  var usedIDs = {};
+  renderer.heading = function(token) {
+    var base = token.text.toLowerCase().replace(/<[^>]+>/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'section';
+    var id = base, n = 2;
+    while (usedIDs[id]) id = base + '-' + n++;
+    usedIDs[id] = true;
+    return '<h' + token.depth + ' id="' + id + '">' + this.parser.parseInline(token.tokens) + '</h' + token.depth + '>';
+  };
   marked.use({renderer: renderer});
 
   fetch('{{.RawURL}}')
@@ -409,6 +425,9 @@ var viewerTemplate = template.Must(template.New("viewer").Parse(`<!DOCTYPE html>
       loading.style.display = 'none';
       body.style.display = 'block';
       mermaid.run({nodes: body.querySelectorAll('.mermaid')});
+      // Content renders after load, so the browser can't jump to #id itself.
+      var target = window.location.hash && document.getElementById(decodeURIComponent(window.location.hash.slice(1)));
+      if (target) target.scrollIntoView({block: 'start'});
     })
     .catch(function() { loading.textContent = 'Failed to load markdown.'; });
 })();
@@ -750,6 +769,7 @@ var siteViewerTemplate = template.Must(template.New("siteviewer").Parse(`<!DOCTY
     </form>
     <div class="trove-comments-filter">
       <label><input type="checkbox" id="trove-comments-show-resolved"> Show resolved threads</label>
+      <label><input type="checkbox" id="trove-comments-all-pages"> All pages</label>
     </div>
     <ol id="trove-comments-list" class="trove-comments-list"></ol>
   </div>
@@ -767,14 +787,16 @@ var siteViewerTemplate = template.Must(template.New("siteviewer").Parse(`<!DOCTY
 
   var params = new URLSearchParams(window.location.search);
   var page = params.get('page') || 'index.html';
-  frame.src = '/' + slug + '/' + page;
+  frame.src = '/' + slug + '/' + page + window.location.hash;
 
   frame.addEventListener('load', function() {
     try {
       var path = frame.contentWindow.location.pathname;
       var currentPage = path.replace('/' + slug + '/', '');
-      var newQuery = currentPage === 'index.html' ? '' : '?page=' + encodeURIComponent(currentPage);
-      history.replaceState(null, '', window.location.pathname + newQuery);
+      var query = new URLSearchParams(window.location.search);
+      if (currentPage === 'index.html') query.delete('page'); else query.set('page', currentPage);
+      var search = query.toString();
+      history.replaceState(null, '', window.location.pathname + (search ? '?' + search : '') + frame.contentWindow.location.hash);
       openLink.href = base + '/' + slug + '/' + currentPage;
       document.body.dataset.troveResource = currentPage;
       window.dispatchEvent(new CustomEvent('trove:resource-change', {detail: {resource: currentPage}}));

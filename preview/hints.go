@@ -6,6 +6,10 @@ type Authored struct {
 	Title       bool // <title>/og:title, or a frontmatter title or "# " heading
 	Description bool // meta/og description, or frontmatter description
 	Stats       int  // trove:stat tags or frontmatter stats
+	// HiddenPanels means the page shows panels one at a time (slides, tabs);
+	// HashNav means a script listens for "hashchange", so #id can open them.
+	HiddenPanels bool
+	HashNav      bool
 }
 
 // Hint is a suggestion for making an artifact preview better.
@@ -20,6 +24,7 @@ const (
 	HintDescription = "preview_description"
 	HintStats       = "preview_stats"
 	HintCard        = "preview_card"
+	HintNavigation  = "navigation"
 )
 
 // Hints suggests preview improvements for HTML and Markdown artifacts (and
@@ -54,6 +59,9 @@ func hintsFor(a Authored, hasCard bool) []Hint {
 	}
 	if a.Stats == 0 {
 		hints = append(hints, Hint{HintStats, `If it has key numbers, add up to six <meta name="trove:stat" content="Label: Value"> tags (HTML) or frontmatter "stats" (Markdown); link previews show them as a grid.`})
+	}
+	if a.HiddenPanels && !a.HashNav {
+		hints = append(hints, Hint{HintNavigation, `This page shows panels one at a time (slides or tabs) but doesn't appear to handle #id links, so comments and shared links can't open the right one. Give each panel a stable id, and on load and on "hashchange" show the panel that is or contains location.hash, then scroll it into view. See "Make pages navigable" in /llms.txt.`})
 	}
 	if !hasCard {
 		hints = append(hints, Hint{HintCard, "For reports, proposals and dashboards, attach a preview card: a 1200x630 PNG with the title and one key visual, uploaded with PUT /api/artifacts/{slug}/preview. Link previews show it instead of an excerpt."})
