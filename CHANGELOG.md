@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.1](https://github.com/gametimesf/open-trove/compare/open-trove-v1.14.0...open-trove-v1.14.1) (2026-10-29)
+
+
+### Bug Fixes
+
+* hash changes on an open viewer navigate the document ([#55](https://github.com/gametimesf/open-trove/issues/55)) ([ca41710](https://github.com/gametimesf/open-trove/commit/ca41710ec179e9c4bc2953ca261a86d8ea7b7a8d))
+
 ## [1.14.0](https://github.com/gametimesf/open-trove/compare/open-trove-v1.13.0...open-trove-v1.14.0) (2026-10-29)
 
 
