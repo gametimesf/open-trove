@@ -926,6 +926,18 @@
   targetReset.addEventListener("click", selectFile);
   if (showResolved) showResolved.addEventListener("change", loadThreads);
   if (allPages) allPages.addEventListener("change", loadThreads);
+  // Changing the viewer URL's #fragment on an open page (a pasted or clicked
+  // link to another slide) navigates the document too. The document's own
+  // hash changes update the viewer with replaceState, which doesn't loop back.
+  window.addEventListener("hashchange", () => {
+    const frame = document.querySelector("#trove-content iframe");
+    if (!frame) return;
+    try {
+      if (frame.contentWindow.location.hash !== window.location.hash) frame.contentWindow.location.hash = window.location.hash;
+    } catch (_error) {
+      frame.src = frame.src.split("#")[0] + window.location.hash;
+    }
+  });
   window.addEventListener("resize", scheduleBoxes);
   window.addEventListener("scroll", scheduleBoxes, true);
   window.addEventListener("trove:resource-change", () => {
