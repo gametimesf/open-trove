@@ -73,8 +73,12 @@ type Anchor struct {
 	Tag         string     `json:"tag,omitempty"`
 	Role        string     `json:"role,omitempty"`
 	VisibleText string     `json:"visible_text,omitempty"`
-	Quote       TextQuote  `json:"quote,omitempty"`
-	Rect        Rect       `json:"rect,omitempty"`
+	// Container is the id of the nearest element around the anchor that the
+	// page can navigate to with #id (a slide, tab or section). The viewer
+	// navigates there first so hidden panels are shown.
+	Container string    `json:"container,omitempty"`
+	Quote     TextQuote `json:"quote,omitempty"`
+	Rect      Rect      `json:"rect,omitempty"`
 }
 
 // Comment is an attributed message. Root comments own the thread anchor and
@@ -337,6 +341,11 @@ func (s *Service) Resolve(ctx context.Context, slug, threadID, actorEmail string
 
 // List returns threads for the requested resource. Whole-artifact threads are
 // included on every site page. Open threads are the default view.
+// AllResources lists threads on every page of a multi-page site.
+const AllResources = "*"
+
+// List returns threads on resource (a site page; "" for single files) plus
+// whole-artifact threads, or on every page when resource is AllResources.
 func (s *Service) List(ctx context.Context, slug, resource string, resolution ResolutionFilter) ([]Thread, error) {
 	items, err := s.listStored(ctx, slug)
 	if err != nil {
@@ -349,6 +358,7 @@ func (s *Service) List(ctx context.Context, slug, resource string, resolution Re
 		return nil, invalid("unsupported resolution filter %q", resolution)
 	}
 
+	allResources := resource == AllResources
 	resource = cleanResource(resource)
 	roots := make(map[string]Comment)
 	replies := make(map[string][]Comment)
@@ -365,7 +375,7 @@ func (s *Service) List(ctx context.Context, slug, resource string, resolution Re
 	threads := make([]Thread, 0, len(roots))
 	for id, root := range roots {
 		rootResource := cleanResource(root.Anchor.Resource)
-		if rootResource != "" && rootResource != resource {
+		if !allResources && rootResource != "" && rootResource != resource {
 			continue
 		}
 		threadReplies := replies[id]
@@ -462,6 +472,7 @@ func normalizeAnchor(anchor Anchor) Anchor {
 	anchor.Tag = strings.TrimSpace(anchor.Tag)
 	anchor.Role = strings.TrimSpace(anchor.Role)
 	anchor.VisibleText = strings.TrimSpace(anchor.VisibleText)
+	anchor.Container = strings.TrimSpace(anchor.Container)
 	anchor.Quote.Exact = strings.TrimSpace(anchor.Quote.Exact)
 	anchor.Quote.Prefix = strings.TrimSpace(anchor.Quote.Prefix)
 	anchor.Quote.Suffix = strings.TrimSpace(anchor.Quote.Suffix)
@@ -490,6 +501,7 @@ func validateCreate(slug, authorEmail string, input CreateInput) error {
 	}
 	for name, value := range map[string]string{
 		"stable_id": input.Anchor.StableID,
+		"container": input.Anchor.Container,
 		"label":     input.Anchor.Label,
 		"tag":       input.Anchor.Tag,
 		"role":      input.Anchor.Role,

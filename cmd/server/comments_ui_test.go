@@ -41,7 +41,14 @@ func TestCommentAssetsAreServed(t *testing.T) {
 				`URLSearchParams(window.location.search).get("comment")`,
 				"trove-comment-thread--linked",
 				"That comment is no longer available.",
-				"loadThreads().then(openLinkedThread)",
+				"container: containerID(element)",
+				"container: containerID(range.startContainer)",
+				"await revealContainer(anchor.container)",
+				"location.hash = id",
+				`win.addEventListener("hashchange"`,
+				`query.set("pages", "all")`,
+				"pendingFocus = comment",
+				"openLinkedThread();",
 			},
 		},
 		{
@@ -140,9 +147,39 @@ func TestSiteViewerRendersCommentChrome(t *testing.T) {
 		`data-trove-resource="index.html"`,
 		`trove:resource-change`,
 		`id="trove-comments-show-resolved"`,
+		`id="trove-comments-all-pages"`,
+		`frame.src = '/' + slug + '/' + page + window.location.hash`,
+		`frame.contentWindow.location.hash`,
 	} {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Errorf("site viewer does not contain %q", want)
 		}
+	}
+}
+
+func TestViewersSupportDeepLinks(t *testing.T) {
+	tests := []struct {
+		name, filename, contentType string
+		want                        []string
+	}{
+		{name: "html passes #id to the document", filename: "deck.html", contentType: "text/html; charset=utf-8",
+			want: []string{`id="doc-frame"`, `frame.src = frame.getAttribute('src') + window.location.hash`}},
+		{name: "markdown headings get ids", filename: "notes.md", contentType: "text/markdown; charset=utf-8",
+			want: []string{`renderer.heading = function(token)`, `'<h' + token.depth + ' id="' + id + '">'`, `target.scrollIntoView`}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv, store := newTestServer()
+			if err := store.Put(context.Background(), "doc", bytes.NewBufferString("# x"), storage.PutOptions{ContentType: tt.contentType, Filename: tt.filename, CustomSlug: true}); err != nil {
+				t.Fatal(err)
+			}
+			rec := httptest.NewRecorder()
+			newTestEcho(srv).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/doc", nil))
+			for _, want := range tt.want {
+				if !strings.Contains(rec.Body.String(), want) {
+					t.Errorf("viewer does not contain %q", want)
+				}
+			}
+		})
 	}
 }

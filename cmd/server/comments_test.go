@@ -403,3 +403,44 @@ func listThreads(t *testing.T, e http.Handler, target string) CommentListRespons
 }
 
 const echoHeaderContentType = "Content-Type"
+
+func TestCommentAPIListsAllSitePages(t *testing.T) {
+	srv, store := newTestServer()
+	ctx := context.Background()
+	for _, page := range []string{"index.html", "pricing.html"} {
+		if err := store.PutSiteFile(ctx, "site", page, bytes.NewBufferString("<h1>"+page+"</h1>"), "text/html; charset=utf-8"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.PutSiteManifest(ctx, "site", nil); err != nil {
+		t.Fatal(err)
+	}
+	e := newTestEcho(srv)
+	for _, page := range []string{"index.html", "pricing.html"} {
+		body := `{"body":"note","anchor":{"type":"element","resource":"` + page + `","selector":"h1","container":"top"}}`
+		req := httptest.NewRequest(http.MethodPost, "/api/artifacts/site/comments?path="+page, bytes.NewBufferString(body))
+		req.Header.Set(echoHeaderContentType, "application/json")
+		req.Header.Set(troveUserEmailHeader, testUserEmail)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("POST %s = %d: %s", page, rec.Code, rec.Body.String())
+		}
+	}
+	list := func(query string) CommentListResponse {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/artifacts/site/comments?"+query, nil))
+		var listed CommentListResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
+			t.Fatalf("decoding %s: %v", query, err)
+		}
+		return listed
+	}
+	if got := list("path=pricing.html"); len(got.Threads) != 1 || got.Threads[0].Root.Anchor.Container != "top" {
+		t.Fatalf("one page = %+v", got.Threads)
+	}
+	if got := list("path=pricing.html&pages=all"); len(got.Threads) != 2 {
+		t.Fatalf("all pages = %d threads, want 2", len(got.Threads))
+	}
+}

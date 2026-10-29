@@ -45,6 +45,8 @@ Before you upload HTML or Markdown that people will share, give it a
 preview: a title, a one- or two-sentence summary that states the takeaway,
 the key numbers as stats, and for reports, proposals and dashboards a
 preview card. See "Make links preview well" and "Set a preview card".
+Pages that show content one panel at a time (slides, tabs) must also follow
+"Make pages navigable".
 
 Example (single file):
 
@@ -249,6 +251,38 @@ Rules:
   be selectable.
 - Semantic HTML, ordinary id attributes, labels, ARIA labels, headings, and
   visible text improve fallback anchors.
+
+### Make pages navigable (required for slides, tabs and sites)
+Comments, comment notifications and shared links open the exact place they
+point at: Trove navigates the document to #<id>, then scrolls to and
+highlights the target. Pages must honor that:
+
+1. Give every navigable part a stable, unique id: each slide, tab panel and
+   section, and key components inside them. Keep ids the same when you
+   regenerate the page, so existing comments keep pointing at the right place.
+2. If the page hides content (one slide or tab shown at a time, collapsed
+   sections), show the panel that is or contains location.hash on load and on
+   "hashchange", then scroll it into view. Plain scrolling pages already work.
+
+For a slide deck with showSlide(index):
+
+    function openHash() {
+      var target = location.hash && document.getElementById(decodeURIComponent(location.hash.slice(1)));
+      var slide = target && target.closest('.slide');
+      if (slide) showSlide(Array.prototype.indexOf.call(document.querySelectorAll('.slide'), slide));
+      if (target) target.scrollIntoView({block: 'center'});
+    }
+    window.addEventListener('hashchange', openHash);
+    openHash();
+
+Optionally, set location.hash to the current slide's id when the reader moves,
+so the address bar always links to what they see.
+
+Links: /my-deck#slide-q4 opens that slide. On a multi-page site, every page
+follows the same rule and links add the page: /my-site?page=pricing.html#tiers.
+Markdown headings get ids automatically (lowercase words joined by hyphens).
+Uploads that show panels one at a time without handling #id return a
+"navigation" hint.
 
 ### Make links preview well
 

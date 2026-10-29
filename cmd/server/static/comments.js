@@ -15,6 +15,7 @@
   const targetLabel = document.getElementById("trove-comment-target-label");
   const targetReset = document.getElementById("trove-comment-target-reset");
   const showResolved = document.getElementById("trove-comments-show-resolved");
+  const allPages = document.getElementById("trove-comments-all-pages");
   const content = document.getElementById("trove-content");
   const hoverBox = document.getElementById("trove-comment-hover-box");
   const anchorBox = document.getElementById("trove-comment-anchor-box");
@@ -35,6 +36,9 @@
   const linkedThreadID = new URLSearchParams(window.location.search).get("comment") || "";
   let highlightedThread = "";
   let linkHandled = false;
+  // A thread on another site page, focused once that page loads.
+  let pendingFocus = null;
+  const hashSynced = new WeakSet();
   // Site pages report their resource after the frame loads; resolve the link then.
   const siteViewer = !!document.getElementById("site-frame");
 
@@ -52,6 +56,7 @@
     const query = new URLSearchParams();
     if (resource) query.set("path", resource);
     if (includeResolved) query.set("resolved", "include");
+    if (allPages && allPages.checked) query.set("pages", "all");
     const encoded = query.toString();
     return encoded ? base + "?" + encoded : base;
   }
@@ -247,11 +252,26 @@
     renderBoxes();
   }
 
+  // containerID is the nearest id around a target that the page can navigate
+  // to with #id (a slide, tab or section): the deep-link contract in llms.txt.
+  function containerID(node) {
+    let el = node && (node.nodeType === 1 ? node : node.parentElement);
+    // Views Trove renders itself (Markdown, CSV, code) are always visible and
+    // their ids are Trove's own; only artifact documents in a frame have panels.
+    if (!el || el.ownerDocument === document) return "";
+    while (el && el !== el.ownerDocument.body && el !== el.ownerDocument.documentElement) {
+      if (el.id && !isCommentUI(el)) return el.id;
+      el = el.parentElement;
+    }
+    return "";
+  }
+
   function elementAnchor(element, doc) {
     const rect = element.getBoundingClientRect();
     return {
       type: "element",
       resource: resourcePath(),
+      container: containerID(element),
       stable_id: stableID(element),
       selector: selectorFor(element),
       label: humanLabel(element),
@@ -284,6 +304,7 @@
       anchor: {
         type: "text",
         resource: resourcePath(),
+        container: containerID(range.startContainer),
         stable_id: scope ? stableID(scope) : "",
         selector: scope ? selectorFor(scope) : "",
         label: "Selected text",
@@ -369,6 +390,14 @@
       const attach = () => {
         try {
           attachDocument(frame.contentDocument);
+          const win = frame.contentWindow;
+          if (!hashSynced.has(win)) {
+            hashSynced.add(win);
+            // Keep the viewer URL's #fragment in step so it can be shared.
+            win.addEventListener("hashchange", () => {
+              history.replaceState(null, "", window.location.pathname + window.location.search + win.location.hash);
+            });
+          }
         } catch (_error) {
           // A page that navigates cross-origin remains file-commentable.
         }
@@ -403,6 +432,12 @@
 
   function commentTargetLabel(comment) {
     const anchor = comment.anchor || {};
+    const label = baseTargetLabel(anchor);
+    return allPages && allPages.checked && anchor.resource && anchor.resource !== resourcePath() ?
+      anchor.resource + " · " + label : label;
+  }
+
+  function baseTargetLabel(anchor) {
     if (anchor.type === "text") return "Text: “" + normalizeText(anchor.quote && anchor.quote.exact, 80) + "”";
     if (anchor.type === "element") return anchor.label || anchor.stable_id || "Element";
     return anchor.resource ? "Page: " + anchor.resource : "Whole file";
@@ -440,7 +475,9 @@
     });
   }
 
-  function messageElement(comment) {
+  // threadResource is the page the thread is on; versions are per page, so
+  // only threads on the current page are compared with its version.
+  function messageElement(comment, threadResource) {
     const message = document.createElement("div");
     message.className = "trove-comment-message";
     if (comment.deleted_at) message.classList.add("trove-comment-message--deleted");
@@ -466,7 +503,8 @@
       edited.textContent = "Edited " + new Date(comment.edited_at).toLocaleString();
       message.appendChild(edited);
     }
-    if (comment.artifact_version && currentVersion && comment.artifact_version !== currentVersion) {
+    const onThisPage = !threadResource || threadResource === resourcePath();
+    if (onThisPage && comment.artifact_version && currentVersion && comment.artifact_version !== currentVersion) {
       const stale = document.createElement("div");
       stale.className = "trove-comment-card__stale";
       stale.textContent = "Created on an earlier version";
@@ -562,11 +600,12 @@
     detail.hidden = collapsed;
 
     const target = actionButton(commentTargetLabel(root), "trove-comment-thread__target", () => focusComment(root));
-    detail.append(target, messageElement(root));
+    const threadResource = (root.anchor && root.anchor.resource) || "";
+    detail.append(target, messageElement(root, threadResource));
     replies.forEach(reply => {
       const replyWrap = document.createElement("div");
       replyWrap.className = "trove-comment-reply";
-      replyWrap.appendChild(messageElement(reply));
+      replyWrap.appendChild(messageElement(reply, threadResource));
       detail.appendChild(replyWrap);
     });
 
@@ -710,9 +749,9 @@
     renderThreads();
     const item = list.querySelector('[data-thread-id="' + cssEscape(linkedThreadID) + '"]');
     if (item) item.scrollIntoView({block: "nearest"});
-    whenContentReady(() => {
+    whenContentReady(async () => {
       // Markdown, CSV and DOCX render after load; retry once before giving up.
-      if (!focusComment(thread.root)) {
+      if (!(await focusComment(thread.root))) {
         window.setTimeout(() => {
           setStatus("", "");
           focusComment(thread.root);
@@ -784,12 +823,41 @@
     return range;
   }
 
-  function focusComment(comment) {
+  // revealContainer navigates the document to #id so a page that shows panels
+  // one at a time (slides, tabs) can reveal the one holding the target, then
+  // waits for it to render.
+  function revealContainer(id) {
+    const frame = document.querySelector("#trove-content iframe");
+    if (!id || !frame) return Promise.resolve();
+    try {
+      const location = frame.contentWindow.location;
+      if (location.hash === "#" + id) location.hash = ""; // re-trigger hashchange
+      location.hash = id;
+    } catch (_error) {
+      frame.src = frame.src.split("#")[0] + "#" + encodeURIComponent(id);
+    }
+    return new Promise(resolve => window.setTimeout(resolve, 200));
+  }
+
+  const hiddenTargetMessage = "This comment is on part of the page that's hidden, and the page doesn't support #id links to show it.";
+
+  // focusComment shows a thread's target: it opens the right site page,
+  // reveals the containing panel, then scrolls to and highlights the target.
+  // It resolves to whether the target was found.
+  async function focusComment(comment) {
     const anchor = comment.anchor || {type: "file"};
+    if (siteViewer && anchor.resource && anchor.resource !== resourcePath()) {
+      pendingFocus = comment;
+      const frame = document.getElementById("site-frame");
+      frame.src = "/" + encodeURIComponent(slug) + "/" + anchor.resource.split("/").map(encodeURIComponent).join("/") +
+        (anchor.container ? "#" + encodeURIComponent(anchor.container) : "");
+      return true;
+    }
     if (anchor.type === "file") {
       content.scrollTo({top: 0, behavior: "smooth"});
       return true;
     }
+    await revealContainer(anchor.container);
     const doc = documentForAnchor();
     if (!doc) return false;
     if (anchor.type === "text") {
@@ -803,6 +871,7 @@
       selection.removeAllRanges();
       selection.addRange(range);
       range.startContainer.parentElement?.scrollIntoView({behavior: "smooth", block: "center"});
+      if (!range.getClientRects().length) setStatus(hiddenTargetMessage, "error");
       renderBoxes();
       return true;
     }
@@ -813,6 +882,7 @@
     }
     currentTarget = {element: element, doc: doc};
     element.scrollIntoView({behavior: "smooth", block: "center"});
+    if (!element.getClientRects().length) setStatus(hiddenTargetMessage, "error");
     renderBoxes();
     return true;
   }
@@ -855,11 +925,21 @@
   close.addEventListener("click", closeComments);
   targetReset.addEventListener("click", selectFile);
   if (showResolved) showResolved.addEventListener("change", loadThreads);
+  if (allPages) allPages.addEventListener("change", loadThreads);
   window.addEventListener("resize", scheduleBoxes);
   window.addEventListener("scroll", scheduleBoxes, true);
   window.addEventListener("trove:resource-change", () => {
     selectFile();
-    loadThreads().then(openLinkedThread);
+    loadThreads().then(() => {
+      openLinkedThread();
+      if (pendingFocus && pendingFocus.anchor && pendingFocus.anchor.resource === resourcePath()) {
+        const comment = pendingFocus;
+        pendingFocus = null;
+        highlightedThread = comment.id;
+        renderThreads();
+        whenContentReady(() => focusComment(comment));
+      }
+    });
     attachFrames();
   });
   document.addEventListener("keydown", event => {

@@ -36,6 +36,7 @@ type CommentListResponse struct {
 // @Param slug path string true "Artifact slug"
 // @Param path query string false "Page path within a multi-page site"
 // @Param resolved query string false "Resolution filter: open, include, or only"
+// @Param pages query string false "Set to all to list threads on every page of a multi-page site"
 // @Success 200 {object} main.CommentListResponse
 // @Failure 400 {object} main.ErrorResponse
 // @Failure 404 {object} main.ErrorResponse
@@ -52,7 +53,11 @@ func (s *server) handleListComments(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 
-	threads, err := s.comments.List(c.Request().Context(), slug, resource, resolution)
+	listResource := resource
+	if c.QueryParam("pages") == "all" {
+		listResource = comments.AllResources
+	}
+	threads, err := s.comments.List(c.Request().Context(), slug, listResource, resolution)
 	if err != nil {
 		if errors.Is(err, comments.ErrInvalidComment) {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
