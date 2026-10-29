@@ -146,11 +146,27 @@ func uploadFile(t *testing.T, client *http.Client, filename string, content []by
 		t.Fatalf("POST /upload status %d: %s", resp.StatusCode, body)
 	}
 
-	var result map[string]string
-	if err := json.Unmarshal(body, &result); err != nil {
+	result, err := stringFields(body)
+	if err != nil {
 		t.Fatalf("decoding upload response: %v", err)
 	}
 	return result
+}
+
+// stringFields decodes a JSON object and keeps its string fields; upload
+// responses also carry structured fields such as hints.
+func stringFields(body []byte) (map[string]string, error) {
+	var raw map[string]any
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(raw))
+	for k, v := range raw {
+		if str, ok := v.(string); ok {
+			out[k] = str
+		}
+	}
+	return out, nil
 }
 
 func TestHealthz(t *testing.T) {
@@ -824,8 +840,8 @@ func TestIntegrationConditionalOverwrite(t *testing.T) {
 			t.Fatalf("POST /upload: %v", err)
 		}
 		defer resp.Body.Close()
-		var out map[string]string
-		json.NewDecoder(resp.Body).Decode(&out)
+		body, _ := io.ReadAll(resp.Body)
+		out, _ := stringFields(body)
 		return resp.StatusCode, out
 	}
 

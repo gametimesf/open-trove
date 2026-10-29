@@ -30,12 +30,21 @@ Headers:
   Trove's browser UI prompts once, caches the email locally, and sends this
   header automatically. API and agent clients must provide it explicitly on
   every request.
+- X-Trove-Client (optional): your tool and version, e.g. trove-skill/1.3.0.
+  Trove tells you when a newer version is available.
 
 Response (JSON):
 - url: The shareable URL for the uploaded file
 - slug: The slug assigned to the file
 - type: "site" when a ZIP was uploaded as a multi-page website
 - version: the stored version; send it as if_match on your next update
+- hints: suggestions for a better link preview (missing title, summary,
+  stats or preview card) and client updates. Act on them before sharing.
+
+Before you upload HTML or Markdown that people will share, give it a
+preview: a title, a one- or two-sentence summary that states the takeaway,
+the key numbers as stats, and for reports, proposals and dashboards a
+preview card. See "Make links preview well" and "Set a preview card".
 
 Example (single file):
 
@@ -244,7 +253,8 @@ Rules:
 ### Make links preview well
 
 When a Trove link is posted in Slack, the preview is built from the artifact
-itself, so a few conventions make it useful at a glance.
+itself. Always set these when you author a page; the upload response lists
+any that are missing.
 
 HTML pages:
 

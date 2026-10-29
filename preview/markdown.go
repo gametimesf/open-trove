@@ -28,6 +28,13 @@ var (
 // summarizeMarkdown reads frontmatter, the first # heading, the first
 // paragraph and ## headings, skipping fenced code.
 func summarizeMarkdown(doc []byte) Summary {
+	s, _ := scanMarkdown(doc)
+	return s
+}
+
+// scanMarkdown summarizes a document and reports which preview hints its
+// author set.
+func scanMarkdown(doc []byte) (Summary, Authored) {
 	body, fm := splitFrontmatter(doc)
 	var (
 		s                 Summary
@@ -95,7 +102,11 @@ func summarizeMarkdown(doc []byte) Summary {
 	if diagrams > 0 {
 		s.Facts = append(s.Facts, plural(diagrams, "diagram", "diagrams"))
 	}
-	return s
+	return s, Authored{
+		Title:       firstNonEmpty(fm.Title, h1) != "",
+		Description: squash(fm.Description) != "",
+		Stats:       len(s.Stats),
+	}
 }
 
 // splitFrontmatter separates a leading "---" YAML block. Malformed

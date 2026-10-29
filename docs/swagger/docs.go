@@ -1166,6 +1166,13 @@ const docTemplate = `{
         "cmd_server.UploadResponse": {
             "type": "object",
             "properties": {
+                "hints": {
+                    "description": "Hints suggest how to make the artifact preview better (missing title,\nsummary, stats or card) and flag an outdated client.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/preview.Hint"
+                    }
+                },
                 "slug": {
                     "type": "string",
                     "example": "my-report"
@@ -1395,6 +1402,17 @@ const docTemplate = `{
                 },
                 "root": {
                     "$ref": "#/definitions/comments.Comment"
+                }
+            }
+        },
+        "preview.Hint": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
                 }
             }
         }

@@ -143,6 +143,14 @@ slack:
   notifications: true
   unfurls: true
 
+# Optional: latest releases of upload clients that send X-Trove-Client
+# (name/version). Older clients get an update hint in the upload response.
+clients:
+  latest:
+    trove-skill:
+      version: "1.3.0"
+      update: "Update the trove plugin."
+
 intake:
   enabled: false
   provider: "anthropic"

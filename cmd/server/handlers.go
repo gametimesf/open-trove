@@ -20,6 +20,7 @@ import (
 	"github.com/gametimesf/open-trove/auth"
 	"github.com/gametimesf/open-trove/comments"
 	"github.com/gametimesf/open-trove/intake"
+	"github.com/gametimesf/open-trove/internal/config"
 	"github.com/gametimesf/open-trove/internal/favicon"
 	"github.com/gametimesf/open-trove/preview"
 	"github.com/gametimesf/open-trove/storage"
@@ -34,10 +35,13 @@ type server struct {
 	comments        *comments.Service
 	baseURL         string
 	shareURLRules   []shareURLRule
-	contentReview   contentReview
-	uploads         uploadLimits
-	intake          intake.Inspector // intake.NoOp{} when feature disabled
-	intakeFail      intake.FailMode  // closed (default) or open
+	// latestClients maps upload client names to their latest release, for
+	// update hints (X-Trove-Client).
+	latestClients map[string]config.ClientRelease
+	contentReview contentReview
+	uploads       uploadLimits
+	intake        intake.Inspector // intake.NoOp{} when feature disabled
+	intakeFail    intake.FailMode  // closed (default) or open
 	// intn returns a random int in [0, n); injected so favicon selection is testable.
 	intn func(n int) int
 	// identity resolves each request's principal; see docs/authentication.md.
@@ -445,7 +449,10 @@ func (s *server) handleUpload(c echo.Context) error {
 	} else {
 		log.Printf("WARN  reading version after upload slug=%s: %v", slug, err)
 	}
-	return c.JSON(http.StatusOK, UploadResponse{URL: s.viewURLFor(slug), Slug: slug, Version: version})
+	hints := append(s.clientHint(c), withSlug(preview.Hints(contentType, header.Filename, head(fileBytes), s.hasCard(r.Context(), slug)), slug)...)
+	client, clientVersion := uploadClient(c)
+	log.Printf("INFO  upload hints slug=%s client=%q client_version=%q hints=%d", slug, client, clientVersion, len(hints))
+	return c.JSON(http.StatusOK, UploadResponse{URL: s.viewURLFor(slug), Slug: slug, Version: version, Hints: hints})
 }
 
 // requestedVersion returns the if_match form field or If-Match header, without quotes.
@@ -831,7 +838,17 @@ func (s *server) handleSiteUploadFromZip(c echo.Context, slug string, zipBytes [
 
 	log.Printf("INFO  user_email=%q user_id=%s uploaded site slug=%s files=%d custom_slug=%v", userEmail(c), uid, slug, fileCount, userProvidedSlug)
 
-	return c.JSON(http.StatusOK, UploadResponse{URL: s.viewURLFor(slug), Slug: slug, Type: "site", Version: version})
+	var entry []byte
+	for _, pf := range pending {
+		if pf.path == "index.html" {
+			entry = head(pf.data)
+			break
+		}
+	}
+	hints := append(s.clientHint(c), withSlug(preview.SiteHints(entry, s.hasCard(r.Context(), slug)), slug)...)
+	client, clientVersion := uploadClient(c)
+	log.Printf("INFO  upload hints slug=%s client=%q client_version=%q hints=%d", slug, client, clientVersion, len(hints))
+	return c.JSON(http.StatusOK, UploadResponse{URL: s.viewURLFor(slug), Slug: slug, Type: "site", Version: version, Hints: hints})
 }
 
 func safeSitePath(name, stripPrefix string) (string, error) {

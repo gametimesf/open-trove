@@ -27,6 +27,12 @@ var chrome = map[atom.Atom]bool{
 // meta tags. Precedence: og:title, <title>, first <h1>; meta description,
 // og:description, first substantial paragraph.
 func summarizeHTML(doc []byte) Summary {
+	s, _ := scanHTML(doc)
+	return s
+}
+
+// scanHTML summarizes a page and reports which preview hints its author set.
+func scanHTML(doc []byte) (Summary, Authored) {
 	var (
 		s                      Summary
 		title, ogTitle, h1     string
@@ -101,7 +107,11 @@ func summarizeHTML(doc []byte) Summary {
 	}
 	s.Title = firstNonEmpty(ogTitle, title, h1)
 	s.Description = firstNonEmpty(metaDesc, ogDesc, para)
-	return s
+	return s, Authored{
+		Title:       firstNonEmpty(ogTitle, title) != "",
+		Description: firstNonEmpty(metaDesc, ogDesc) != "",
+		Stats:       len(s.Stats),
+	}
 }
 
 func isCaptured(a atom.Atom) bool {
