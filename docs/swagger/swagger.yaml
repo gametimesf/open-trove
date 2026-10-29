@@ -54,6 +54,37 @@ definitions:
         example: trove
         type: string
     type: object
+  cmd_server.ArtifactResponse:
+    properties:
+      content_type:
+        example: text/html; charset=utf-8
+        type: string
+      file_count:
+        example: 12
+        type: integer
+      filename:
+        example: q3.html
+        type: string
+      kind:
+        description: Kind is "file" or "site".
+        example: file
+        type: string
+      owner_email:
+        example: alex@example.com
+        type: string
+      slug:
+        example: q3-review
+        type: string
+      url:
+        example: https://trove.example.com/q3-review
+        type: string
+      version:
+        description: |-
+          Version identifies the current content; send it as if_match when
+          overwriting. Empty for sites uploaded before versions existed.
+        example: 5d41402abc4b2a76b9719d911017c592
+        type: string
+    type: object
   cmd_server.CommentListResponse:
     properties:
       current_version:
@@ -84,8 +115,18 @@ definitions:
       slug:
         example: my-report
         type: string
+      type:
+        description: Type is "site" for ZIP uploads.
+        example: site
+        type: string
       url:
         example: https://trove.example.com/my-report
+        type: string
+      version:
+        description: |-
+          Version identifies the stored content; pass it as if_match on the next
+          overwrite.
+        example: 5d41402abc4b2a76b9719d911017c592
         type: string
     type: object
   cmd_server.cardResponse:
@@ -339,6 +380,35 @@ paths:
           schema:
             type: string
       summary: Download raw file
+      tags:
+      - files
+  /api/artifacts/{slug}:
+    get:
+      description: Returns an artifact's kind, current version, type and owner without
+        its content. Read the version before overwriting and send it as if_match so
+        a concurrent edit isn't lost.
+      parameters:
+      - description: Artifact slug
+        in: path
+        name: slug
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/cmd_server.ArtifactResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/cmd_server.ErrorResponse'
+      summary: Get artifact metadata
       tags:
       - files
   /api/artifacts/{slug}/comments:

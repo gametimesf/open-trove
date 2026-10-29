@@ -799,3 +799,50 @@ func TestIndex(t *testing.T) {
 		t.Error("expected index page to contain 'trove'")
 	}
 }
+
+// TestIntegrationConditionalOverwrite checks if_match against real object
+// storage: the current version succeeds, a stale one is rejected unchanged.
+func TestIntegrationConditionalOverwrite(t *testing.T) {
+	client := newClient()
+	slug := fmt.Sprintf("ifmatch-%d", time.Now().UnixNano())
+	v1 := uploadFile(t, client, "doc.txt", []byte("v1"), slug, false)["version"]
+	if v1 == "" {
+		t.Fatal("upload response has no version")
+	}
+
+	post := func(content, ifMatch string) (int, map[string]string) {
+		t.Helper()
+		var buf bytes.Buffer
+		w := multipart.NewWriter(&buf)
+		part, _ := w.CreateFormFile("file", "doc.txt")
+		part.Write([]byte(content))
+		w.WriteField("slug", slug)
+		w.WriteField("if_match", ifMatch)
+		w.Close()
+		resp, err := client.Post(baseURL+"/upload", w.FormDataContentType(), &buf)
+		if err != nil {
+			t.Fatalf("POST /upload: %v", err)
+		}
+		defer resp.Body.Close()
+		var out map[string]string
+		json.NewDecoder(resp.Body).Decode(&out)
+		return resp.StatusCode, out
+	}
+
+	code, out := post("v2", v1)
+	if code != http.StatusOK || out["version"] == "" || out["version"] == v1 {
+		t.Fatalf("overwrite with current version = %d %v", code, out)
+	}
+	v2 := out["version"]
+	if code, out = post("stale", v1); code != http.StatusPreconditionFailed || out["current_version"] != v2 {
+		t.Fatalf("stale overwrite = %d %v, want 412 with current_version %s", code, out, v2)
+	}
+	resp, err := client.Get(baseURL + "/" + slug + "/raw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if body, _ := io.ReadAll(resp.Body); string(body) != "v2" {
+		t.Fatalf("content after rejected write = %q", body)
+	}
+}

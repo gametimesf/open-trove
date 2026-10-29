@@ -20,6 +20,10 @@ Parameters:
 - file (required): The file to upload (.html, .md, .zip, images, code, etc.)
 - slug (optional): Custom URL slug (lowercase alphanumeric and hyphens, 1-64 chars)
 - overwrite (optional): Set to "true" to replace an existing file at the same slug
+- if_match (optional, recommended when updating): the version you last read.
+  The upload replaces the artifact only if it is still at that version;
+  otherwise it returns 412 with current_version and changes nothing. Implies
+  overwrite. An If-Match header works too.
 
 Headers:
 - X-Trove-User-Email (required for writes): Email used for audit attribution.
@@ -31,6 +35,7 @@ Response (JSON):
 - url: The shareable URL for the uploaded file
 - slug: The slug assigned to the file
 - type: "site" when a ZIP was uploaded as a multi-page website
+- version: the stored version; send it as if_match on your next update
 
 Example (single file):
 
@@ -44,6 +49,27 @@ Example (multi-page website from ZIP):
     curl -X POST "$TROVE_BASE_URL/upload" \
       -H "X-Trove-User-Email: you@example.com" \
       -F file=@site.zip -F slug=my-site
+
+### Update an existing artifact safely
+Someone else (or another agent) may have changed it since you last looked.
+Read the current version, merge their changes into yours, then upload with
+if_match:
+
+    curl -s "$TROVE_BASE_URL/api/artifacts/my-report"   # {"version": "...", ...}
+    curl -X POST "$TROVE_BASE_URL/upload" \
+      -H "X-Trove-User-Email: you@example.com" \
+      -F file=@report.html -F slug=my-report -F if_match=<version>
+
+On 412, fetch /my-report/raw, merge, and retry with the new version. For
+ZIP sites the check happens before writing (not atomically) and sites
+uploaded before versions existed have an empty version: overwrite them once
+without if_match to get one.
+
+### Get artifact metadata
+GET /api/artifacts/{slug}
+Returns slug, kind (file or site), version, content_type, filename,
+owner_email, file_count (sites) and url, without the content. /{slug}/raw
+also sends the version as its ETag.
 
 ### Upload a multi-page website
 Upload a ZIP file containing an index.html at the root. Trove serves it as a full

@@ -51,10 +51,14 @@ func (s *Store) Put(_ context.Context, slug string, body io.Reader, opts storage
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if !opts.Overwrite {
-		if _, exists := s.objects[slug]; exists {
-			return storage.ErrSlugConflict
+	existing, exists := s.objects[slug]
+	switch {
+	case opts.IfMatch != "":
+		if !exists || objectVersion(existing.data) != opts.IfMatch {
+			return storage.ErrVersionMismatch
 		}
+	case !opts.Overwrite && exists:
+		return storage.ErrSlugConflict
 	}
 
 	data, err := io.ReadAll(body)
