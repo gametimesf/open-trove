@@ -48,6 +48,7 @@ func TestCommentAssetsAreServed(t *testing.T) {
 				`win.addEventListener("hashchange"`,
 				`query.set("pages", "all")`,
 				"pendingFocus = comment",
+				"frame.contentWindow.location.hash = window.location.hash",
 				"openLinkedThread();",
 			},
 		},
