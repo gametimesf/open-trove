@@ -1,5 +1,7 @@
 package main
 
+import "github.com/gametimesf/open-trove/preview"
+
 // UploadResponse documents the response from a successful file upload.
 type UploadResponse struct {
 	URL  string `json:"url" example:"https://trove.example.com/my-report"`
@@ -9,6 +11,9 @@ type UploadResponse struct {
 	// Version identifies the stored content; pass it as if_match on the next
 	// overwrite.
 	Version string `json:"version,omitempty" example:"5d41402abc4b2a76b9719d911017c592"`
+	// Hints suggest how to make the artifact preview better (missing title,
+	// summary, stats or card) and flag an outdated client.
+	Hints []preview.Hint `json:"hints,omitempty"`
 }
 
 // VersionConflictResponse is returned with 412 when if_match is stale.

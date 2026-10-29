@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -410,5 +411,33 @@ slack:
 	writeYAML(t, dir, "trove.yaml", "slack:\n  bot_token: xoxb-in-yaml\n")
 	if _, err := Load(); err == nil {
 		t.Fatal("expected tokens in YAML to be rejected as unknown fields")
+	}
+}
+
+func TestClientVersions(t *testing.T) {
+	tests := []struct {
+		a, b  string
+		older bool
+	}{
+		{"1.2.0", "1.3.0", true}, {"1.10.0", "1.9.0", false}, {"1.3", "1.3.0", false},
+		{"v1.2.9", "1.3.0", true}, {"2.0.0", "1.99.0", false}, {"bad", "1.0.0", false},
+	}
+	for _, tt := range tests {
+		if got := OlderVersion(tt.a, tt.b); got != tt.older {
+			t.Errorf("OlderVersion(%q, %q) = %t, want %t", tt.a, tt.b, got, tt.older)
+		}
+	}
+	cfg := Config{
+		Port:    "8080",
+		BaseURL: "https://trove.example.com",
+		Uploads: Uploads{MaxBytes: 1, MaxSiteFiles: 1, MaxSiteBytes: 1, MaxSiteFileBytes: 1},
+		Clients: Clients{Latest: map[string]ClientRelease{"trove-skill": {Version: "1.3.0"}}},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("valid client version rejected: %v", err)
+	}
+	cfg.Clients.Latest["trove-skill"] = ClientRelease{Version: "one"}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "clients.latest.trove-skill") {
+		t.Fatalf("Validate = %v, want a clients.latest error", err)
 	}
 }

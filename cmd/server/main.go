@@ -61,6 +61,7 @@ func main() {
 		intake:          inspector,
 		intakeFail:      failMode,
 		intn:            rand.IntN,
+		latestClients:   cfg.Clients.Latest,
 		uploads: uploadLimits{
 			maxBytes:         cfg.Uploads.MaxBytes,
 			maxSiteFiles:     cfg.Uploads.MaxSiteFiles,

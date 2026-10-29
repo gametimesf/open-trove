@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -27,6 +28,20 @@ type Config struct {
 	ContentReview   ContentReview  `yaml:"content_review"`
 	Auth            Auth           `yaml:"auth"`
 	Slack           Slack          `yaml:"slack"`
+	Clients         Clients        `yaml:"clients"`
+}
+
+// Clients lists the latest release of known upload clients. A client that
+// identifies itself with an older version (X-Trove-Client: name/version) gets
+// an update hint in the upload response.
+type Clients struct {
+	Latest map[string]ClientRelease `yaml:"latest"`
+}
+
+// ClientRelease is a client's latest version and how to update to it.
+type ClientRelease struct {
+	Version string `yaml:"version"`
+	Update  string `yaml:"update"` // optional instructions, e.g. "Run /plugin and update trove."
 }
 
 // Slack configures the optional Slack app (docs/slack.md). Tokens are read only
@@ -284,7 +299,56 @@ func (c *Config) Validate() error {
 	if err := c.Auth.validate(); err != nil {
 		return err
 	}
-	return c.Slack.validate()
+	if err := c.Slack.validate(); err != nil {
+		return err
+	}
+	for name, rel := range c.Clients.Latest {
+		if name == "" || !ValidVersion(rel.Version) {
+			return fmt.Errorf("config: clients.latest.%s.version must be dotted numbers like 1.3.0", name)
+		}
+	}
+	return nil
+}
+
+// ValidVersion reports whether v is dotted numbers, e.g. "1.3.0".
+func ValidVersion(v string) bool {
+	_, ok := parseVersion(v)
+	return ok
+}
+
+// OlderVersion reports whether a is older than b; both must be valid.
+func OlderVersion(a, b string) bool {
+	pa, okA := parseVersion(a)
+	pb, okB := parseVersion(b)
+	if !okA || !okB {
+		return false
+	}
+	for i := range max(len(pa), len(pb)) {
+		var x, y int
+		if i < len(pa) {
+			x = pa[i]
+		}
+		if i < len(pb) {
+			y = pb[i]
+		}
+		if x != y {
+			return x < y
+		}
+	}
+	return false
+}
+
+func parseVersion(v string) ([]int, bool) {
+	parts := strings.Split(strings.TrimPrefix(strings.TrimSpace(v), "v"), ".")
+	nums := make([]int, 0, len(parts))
+	for _, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil || n < 0 {
+			return nil, false
+		}
+		nums = append(nums, n)
+	}
+	return nums, len(nums) > 0
 }
 
 func (s *Slack) validate() error {

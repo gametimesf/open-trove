@@ -112,6 +112,13 @@ definitions:
     type: object
   cmd_server.UploadResponse:
     properties:
+      hints:
+        description: |-
+          Hints suggest how to make the artifact preview better (missing title,
+          summary, stats or card) and flag an outdated client.
+        items:
+          $ref: '#/definitions/preview.Hint'
+        type: array
       slug:
         example: my-report
         type: string
@@ -268,6 +275,13 @@ definitions:
         type: array
       root:
         $ref: '#/definitions/comments.Comment'
+    type: object
+  preview.Hint:
+    properties:
+      code:
+        type: string
+      message:
+        type: string
     type: object
 host: localhost:8080
 info:
