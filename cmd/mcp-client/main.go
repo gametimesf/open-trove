@@ -206,9 +206,16 @@ func httpUpload(client *http.Client, baseURL, filename string, content []byte, s
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, body)
 	}
-	var result map[string]string
-	if err := json.Unmarshal(body, &result); err != nil {
+	// Keep the string fields; the response also carries structured hints.
+	var raw map[string]any
+	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, fmt.Errorf("decoding upload response: %w", err)
+	}
+	result := make(map[string]string, len(raw))
+	for k, v := range raw {
+		if str, ok := v.(string); ok {
+			result[k] = str
+		}
 	}
 	return result, nil
 }
