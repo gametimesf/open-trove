@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.0](https://github.com/gametimesf/open-trove/compare/open-trove-v1.13.0...open-trove-v1.14.0) (2026-10-29)
+
+
+### Features
+
+* comments and links navigate into slides, tabs and other pages ([#53](https://github.com/gametimesf/open-trove/issues/53)) ([e5ac706](https://github.com/gametimesf/open-trove/commit/e5ac7060a3dced2cbe4dab8df18d76fa15c29ec9)), closes [#52](https://github.com/gametimesf/open-trove/issues/52)
+
 ## [1.13.0](https://github.com/gametimesf/open-trove/compare/open-trove-v1.12.0...open-trove-v1.13.0) (2026-10-29)
 
 
