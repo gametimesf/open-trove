@@ -3,6 +3,8 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +14,7 @@ import (
 	"net/url"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/gametimesf/open-trove/auth"
@@ -354,6 +357,15 @@ func (s *server) handleUpload(c echo.Context) error {
 	}
 
 	overwrite := c.FormValue("overwrite") == "true"
+	// if_match (or an If-Match header) makes the overwrite conditional on the
+	// version the caller last read, so concurrent editors don't clobber each other.
+	ifMatch := requestedVersion(c)
+	if ifMatch != "" {
+		if !userProvidedSlug {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "if_match requires a slug"})
+		}
+		overwrite = true
+	}
 
 	// Read a bounded copy so intake and storage can safely re-read it.
 	fileBytes, err := io.ReadAll(io.LimitReader(file, limits.maxBytes+1))
@@ -379,13 +391,16 @@ func (s *server) handleUpload(c echo.Context) error {
 
 	// If ZIP, treat as a site upload
 	if isZip {
-		return s.handleSiteUploadFromZip(c, slug, fileBytes, userProvidedSlug, overwrite)
+		return s.handleSiteUploadFromZip(c, slug, fileBytes, userProvidedSlug, overwrite, ifMatch)
 	}
 
 	// Retry with new slugs on conflict (only for auto-generated slugs)
 	const maxRetries = 5
 	for attempt := 0; ; attempt++ {
-		if err := s.store.Put(r.Context(), slug, bytes.NewReader(fileBytes), storage.PutOptions{ContentType: contentType, Filename: header.Filename, OwnerEmail: userEmail(c), CustomSlug: userProvidedSlug, Overwrite: overwrite}); err != nil {
+		if err := s.store.Put(r.Context(), slug, bytes.NewReader(fileBytes), storage.PutOptions{ContentType: contentType, Filename: header.Filename, OwnerEmail: userEmail(c), CustomSlug: userProvidedSlug, Overwrite: overwrite, IfMatch: ifMatch}); err != nil {
+			if errors.Is(err, storage.ErrVersionMismatch) {
+				return s.versionConflict(c, slug, ifMatch)
+			}
 			if errors.Is(err, storage.ErrSlugConflict) {
 				if userProvidedSlug {
 					return c.JSON(http.StatusConflict, map[string]string{"error": "slug already taken"})
@@ -424,10 +439,34 @@ func (s *server) handleUpload(c echo.Context) error {
 
 	log.Printf("INFO  user_email=%q user_id=%s uploaded slug=%s filename=%q custom_slug=%v content_type=%q", userEmail(c), uid, slug, header.Filename, userProvidedSlug, contentType)
 
-	url := s.viewURLFor(slug)
-	return c.JSON(http.StatusOK, map[string]string{
-		"url":  url,
-		"slug": slug,
+	version := ""
+	if meta, err := s.store.Metadata(r.Context(), slug); err == nil {
+		version = meta.Version
+	} else {
+		log.Printf("WARN  reading version after upload slug=%s: %v", slug, err)
+	}
+	return c.JSON(http.StatusOK, UploadResponse{URL: s.viewURLFor(slug), Slug: slug, Version: version})
+}
+
+// requestedVersion returns the if_match form field or If-Match header, without quotes.
+func requestedVersion(c echo.Context) string {
+	v := strings.TrimSpace(c.FormValue("if_match"))
+	if v == "" {
+		v = strings.TrimSpace(c.Request().Header.Get("If-Match"))
+	}
+	return strings.Trim(strings.TrimPrefix(v, "W/"), `"`)
+}
+
+// versionConflict answers a stale conditional write with the current version.
+func (s *server) versionConflict(c echo.Context, slug, ifMatch string) error {
+	current := ""
+	if a, err := s.lookupArtifact(c.Request().Context(), slug); err == nil {
+		current = a.Version
+	}
+	log.Printf("INFO  user_email=%q upload rejected slug=%s reason=version_mismatch if_match=%s current=%s", userEmail(c), slug, ifMatch, current)
+	return c.JSON(http.StatusPreconditionFailed, VersionConflictResponse{
+		Error:          "artifact changed since version " + ifMatch + "; re-read it, merge, and retry with the current version",
+		CurrentVersion: current,
 	})
 }
 
@@ -605,6 +644,9 @@ func (s *server) handleRaw(c echo.Context) error {
 
 	c.Response().Header().Set(echo.HeaderContentType, meta.ContentType)
 	c.Response().Header().Set("Accept-Ranges", "bytes")
+	if meta.Version != "" {
+		c.Response().Header().Set("ETag", strconv.Quote(meta.Version))
+	}
 	if meta.Filename != "" {
 		downloadName := meta.Filename
 		if meta.CustomSlug {
@@ -645,7 +687,7 @@ func zipSingleDirPrefix(files []*zip.File) string {
 	return prefix
 }
 
-func (s *server) handleSiteUploadFromZip(c echo.Context, slug string, zipBytes []byte, userProvidedSlug, overwrite bool) error {
+func (s *server) handleSiteUploadFromZip(c echo.Context, slug string, zipBytes []byte, userProvidedSlug, overwrite bool, ifMatch string) error {
 	r := c.Request()
 	limits := s.uploads.withDefaults()
 
@@ -671,6 +713,19 @@ func (s *server) handleSiteUploadFromZip(c echo.Context, slug string, zipBytes [
 	}
 	if !hasIndex {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "ZIP must contain index.html"})
+	}
+
+	// A site is many objects, so a conditional overwrite is checked against
+	// the manifest before writing rather than atomically.
+	if ifMatch != "" {
+		manifest, err := s.store.GetSiteManifest(r.Context(), slug)
+		if err != nil && !errors.Is(err, storage.ErrNotFound) {
+			log.Printf("ERROR reading site manifest %s: %v", slug, err)
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		}
+		if err != nil || manifest.Version != ifMatch {
+			return s.versionConflict(c, slug, ifMatch)
+		}
 	}
 
 	// Check for slug conflict
@@ -753,7 +808,9 @@ func (s *server) handleSiteUploadFromZip(c echo.Context, slug string, zipBytes [
 		fileCount++
 	}
 
-	if err := s.store.PutSiteManifest(r.Context(), slug, &storage.SiteManifest{Entry: "index.html", FileCount: fileCount, OwnerEmail: userEmail(c)}); err != nil {
+	sum := sha256.Sum256(zipBytes)
+	version := hex.EncodeToString(sum[:16])
+	if err := s.store.PutSiteManifest(r.Context(), slug, &storage.SiteManifest{Entry: "index.html", FileCount: fileCount, OwnerEmail: userEmail(c), Version: version}); err != nil {
 		log.Printf("ERROR storing site manifest for %s: %v", slug, err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "internal error"})
 	}
@@ -774,11 +831,7 @@ func (s *server) handleSiteUploadFromZip(c echo.Context, slug string, zipBytes [
 
 	log.Printf("INFO  user_email=%q user_id=%s uploaded site slug=%s files=%d custom_slug=%v", userEmail(c), uid, slug, fileCount, userProvidedSlug)
 
-	return c.JSON(http.StatusOK, map[string]string{
-		"url":  s.viewURLFor(slug),
-		"slug": slug,
-		"type": "site",
-	})
+	return c.JSON(http.StatusOK, UploadResponse{URL: s.viewURLFor(slug), Slug: slug, Type: "site", Version: version})
 }
 
 func safeSitePath(name, stripPrefix string) (string, error) {

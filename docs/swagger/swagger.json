@@ -53,6 +53,47 @@
                 }
             }
         },
+        "/api/artifacts/{slug}": {
+            "get": {
+                "description": "Returns an artifact's kind, current version, type and owner without its content. Read the version before overwriting and send it as if_match so a concurrent edit isn't lost.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "files"
+                ],
+                "summary": "Get artifact metadata",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Artifact slug",
+                        "name": "slug",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ArtifactResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/cmd_server.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/artifacts/{slug}/comments": {
             "get": {
                 "description": "Lists whole-artifact threads and threads anchored to the requested site page. Open threads are returned by default.",
@@ -1043,6 +1084,45 @@
                 }
             }
         },
+        "cmd_server.ArtifactResponse": {
+            "type": "object",
+            "properties": {
+                "content_type": {
+                    "type": "string",
+                    "example": "text/html; charset=utf-8"
+                },
+                "file_count": {
+                    "type": "integer",
+                    "example": 12
+                },
+                "filename": {
+                    "type": "string",
+                    "example": "q3.html"
+                },
+                "kind": {
+                    "description": "Kind is \"file\" or \"site\".",
+                    "type": "string",
+                    "example": "file"
+                },
+                "owner_email": {
+                    "type": "string",
+                    "example": "alex@example.com"
+                },
+                "slug": {
+                    "type": "string",
+                    "example": "q3-review"
+                },
+                "url": {
+                    "type": "string",
+                    "example": "https://trove.example.com/q3-review"
+                },
+                "version": {
+                    "description": "Version identifies the current content; send it as if_match when\noverwriting. Empty for sites uploaded before versions existed.",
+                    "type": "string",
+                    "example": "5d41402abc4b2a76b9719d911017c592"
+                }
+            }
+        },
         "cmd_server.CommentListResponse": {
             "type": "object",
             "properties": {
@@ -1088,9 +1168,19 @@
                     "type": "string",
                     "example": "my-report"
                 },
+                "type": {
+                    "description": "Type is \"site\" for ZIP uploads.",
+                    "type": "string",
+                    "example": "site"
+                },
                 "url": {
                     "type": "string",
                     "example": "https://trove.example.com/my-report"
+                },
+                "version": {
+                    "description": "Version identifies the stored content; pass it as if_match on the next\noverwrite.",
+                    "type": "string",
+                    "example": "5d41402abc4b2a76b9719d911017c592"
                 }
             }
         },

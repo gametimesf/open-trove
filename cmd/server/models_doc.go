@@ -4,6 +4,17 @@ package main
 type UploadResponse struct {
 	URL  string `json:"url" example:"https://trove.example.com/my-report"`
 	Slug string `json:"slug" example:"my-report"`
+	// Type is "site" for ZIP uploads.
+	Type string `json:"type,omitempty" example:"site"`
+	// Version identifies the stored content; pass it as if_match on the next
+	// overwrite.
+	Version string `json:"version,omitempty" example:"5d41402abc4b2a76b9719d911017c592"`
+}
+
+// VersionConflictResponse is returned with 412 when if_match is stale.
+type VersionConflictResponse struct {
+	Error          string `json:"error" example:"artifact changed since version 5d41…; re-read it, merge, and retry with the current version"`
+	CurrentVersion string `json:"current_version" example:"7c6a180b36896a0a8c02787eeafb0e4c"`
 }
 
 // ErrorResponse documents error responses.

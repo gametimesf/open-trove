@@ -17,6 +17,9 @@ import (
 var (
 	ErrSlugConflict = errors.New("slug already exists")
 	ErrNotFound     = errors.New("object not found")
+	// ErrVersionMismatch means a conditional write found a different version
+	// (or no object) at the slug.
+	ErrVersionMismatch = errors.New("artifact version mismatch")
 )
 
 // Store is the interface that storage backends must implement.
@@ -49,6 +52,9 @@ type PutOptions struct {
 	OwnerEmail  string
 	CustomSlug  bool
 	Overwrite   bool
+	// IfMatch, when set, replaces the object only if its current Version
+	// equals this value; otherwise Put returns ErrVersionMismatch.
+	IfMatch string
 }
 
 // SiteManifest tracks metadata for a multi-file site upload.
@@ -56,6 +62,9 @@ type SiteManifest struct {
 	Entry      string `json:"entry"`
 	FileCount  int    `json:"file_count"`
 	OwnerEmail string `json:"owner_email,omitempty"`
+	// Version identifies the uploaded ZIP's content; empty for sites
+	// uploaded before versions existed.
+	Version string `json:"version,omitempty"`
 }
 
 // FileMetadata holds metadata about a stored file.

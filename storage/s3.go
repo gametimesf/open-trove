@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -81,7 +82,7 @@ func newS3Store(ctx context.Context, cfg S3Config) (Store, error) {
 }
 
 func (s *s3Store) Put(ctx context.Context, slug string, body io.Reader, opts PutOptions) error {
-	if !opts.Overwrite {
+	if !opts.Overwrite && opts.IfMatch == "" {
 		_, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{
 			Bucket: aws.String(s.bucket),
 			Key:    aws.String(slug),
@@ -108,13 +109,21 @@ func (s *s3Store) Put(ctx context.Context, slug string, body io.Reader, opts Put
 	if opts.CustomSlug {
 		meta["custom-slug"] = "true"
 	}
-	if _, err := s.client.PutObject(ctx, &s3.PutObjectInput{
+	input := &s3.PutObjectInput{
 		Bucket:      aws.String(s.bucket),
 		Key:         aws.String(slug),
 		Body:        body,
 		ContentType: aws.String(opts.ContentType),
 		Metadata:    meta,
-	}); err != nil {
+	}
+	if opts.IfMatch != "" {
+		// Atomic compare-and-swap on the ETag that Version reports.
+		input.IfMatch = aws.String(strconv.Quote(opts.IfMatch))
+	}
+	if _, err := s.client.PutObject(ctx, input); err != nil {
+		if opts.IfMatch != "" && s3ErrorCode(err, "PreconditionFailed", "ConditionalRequestConflict", "NoSuchKey", "NotFound") {
+			return ErrVersionMismatch
+		}
 		return fmt.Errorf("putting object: %w", err)
 	}
 	return nil

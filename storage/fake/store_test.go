@@ -3,7 +3,9 @@ package fake
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/gametimesf/open-trove/storage"
@@ -185,5 +187,23 @@ func TestGetManifestEmpty(t *testing.T) {
 	}
 	if len(m.Uploads) != 0 || len(m.Views) != 0 {
 		t.Errorf("expected empty manifest, got %+v", m)
+	}
+}
+
+func TestPutIfMatch(t *testing.T) {
+	ctx := context.Background()
+	s := NewStore()
+	if err := s.Put(ctx, "doc", strings.NewReader("v1"), storage.PutOptions{IfMatch: "x"}); !errors.Is(err, storage.ErrVersionMismatch) {
+		t.Fatalf("missing object: %v", err)
+	}
+	if err := s.Put(ctx, "doc", strings.NewReader("v1"), storage.PutOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	meta, _ := s.Metadata(ctx, "doc")
+	if err := s.Put(ctx, "doc", strings.NewReader("v2"), storage.PutOptions{IfMatch: "stale"}); !errors.Is(err, storage.ErrVersionMismatch) {
+		t.Fatalf("stale version: %v", err)
+	}
+	if err := s.Put(ctx, "doc", strings.NewReader("v2"), storage.PutOptions{IfMatch: meta.Version}); err != nil {
+		t.Fatalf("current version: %v", err)
 	}
 }

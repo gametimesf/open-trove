@@ -111,6 +111,7 @@ func registerRoutes(e *echo.Echo, srv *server) {
 	e.File("/openapi.json", "docs/openapi.json")
 
 	// Artifact comments API.
+	e.GET("/api/artifacts/:slug", srv.handleGetArtifact)
 	e.GET("/api/artifacts/:slug/comments", srv.handleListComments)
 	e.POST("/api/artifacts/:slug/comments", srv.handleCreateComment)
 	e.POST("/api/artifacts/:slug/comments/:comment_id/replies", srv.handleReplyComment)
