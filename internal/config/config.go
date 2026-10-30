@@ -104,6 +104,10 @@ type ContentReview struct {
 	ContactEmail string `yaml:"contact_email"`
 }
 
+// defaultIntakeConcurrency is how many files of one site are inspected at
+// once when intake.concurrency is unset.
+const defaultIntakeConcurrency = 8
+
 // Intake configures the upload intake pipeline. When Enabled is false,
 // the inspector is a no-op and uploads pass straight through.
 type Intake struct {
@@ -116,6 +120,7 @@ type Intake struct {
 	FailMode     string `yaml:"fail_mode"`       // "closed" (default) or "open"
 	MaxBytes     int    `yaml:"max_check_bytes"` // default 200KB
 	TimeoutMS    int    `yaml:"timeout_ms"`      // default 15000
+	Concurrency  int    `yaml:"concurrency"`     // files of one site checked at once; default 8
 	Endpoint     string `yaml:"endpoint"`        // override; tests / proxies
 
 	// PromptSourceBucket and PromptSourceKey point at the guidance blob
@@ -272,6 +277,12 @@ func (c *Config) Validate() error {
 	if c.Uploads.MaxBytes <= 0 || c.Uploads.MaxSiteFiles <= 0 ||
 		c.Uploads.MaxSiteBytes <= 0 || c.Uploads.MaxSiteFileBytes <= 0 {
 		return fmt.Errorf("config: upload limits must be positive")
+	}
+	switch {
+	case c.Intake.Concurrency < 0:
+		return fmt.Errorf("config: intake.concurrency cannot be negative")
+	case c.Intake.Concurrency == 0:
+		c.Intake.Concurrency = defaultIntakeConcurrency
 	}
 	if c.Uploads.MaxSiteFileBytes > c.Uploads.MaxSiteBytes {
 		return fmt.Errorf("config: uploads.max_site_file_bytes cannot exceed uploads.max_site_bytes")

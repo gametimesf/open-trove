@@ -158,7 +158,12 @@ intake:
   fail_mode: "closed"
   max_check_bytes: 204800
   timeout_ms: 15000
+  concurrency: 8
 ```
+
+Every file in a ZIP site is inspected before anything is stored, up to
+`concurrency` files at a time. Raise it for large sites if your Anthropic rate
+limits allow; keep it low enough that one upload can't exhaust them.
 
 When Anthropic intake is enabled, provide `ANTHROPIC_API_KEY` through your
 secret manager. Guidance can come from `prompt_inline`, `prompt_path`, or the
