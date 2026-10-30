@@ -158,7 +158,12 @@ intake:
   fail_mode: "closed"
   max_check_bytes: 204800
   timeout_ms: 15000
+  concurrency: 8
 ```
+
+Every file in a ZIP site is inspected before anything is stored, up to
+`concurrency` files at a time. Raise it for large sites if your Anthropic rate
+limits allow; keep it low enough that one upload can't exhaust them.
 
 Files the inspector allows are remembered by a hash of their name, type and
 content together with the model and guidance, so re-uploading a file or site

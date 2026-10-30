@@ -127,6 +127,39 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Uploads.MaxBytes != 200<<20 || cfg.Uploads.MaxSiteFiles != 2_000 {
 		t.Errorf("unexpected upload defaults: %+v", cfg.Uploads)
 	}
+	if cfg.Intake.Concurrency != defaultIntakeConcurrency {
+		t.Errorf("intake concurrency = %d, want %d", cfg.Intake.Concurrency, defaultIntakeConcurrency)
+	}
+}
+
+func TestValidateIntakeConcurrency(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   int
+		want    int
+		wantErr bool
+	}{
+		{name: "unset uses the default", value: 0, want: defaultIntakeConcurrency},
+		{name: "explicit value is kept", value: 20, want: 20},
+		{name: "negative is rejected", value: -1, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{
+				Port:    "8080",
+				BaseURL: "https://trove.example.com",
+				Uploads: Uploads{MaxBytes: 1, MaxSiteFiles: 1, MaxSiteBytes: 1, MaxSiteFileBytes: 1},
+				Intake:  Intake{Concurrency: tt.value},
+			}
+			err := cfg.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr && cfg.Intake.Concurrency != tt.want {
+				t.Errorf("concurrency = %d, want %d", cfg.Intake.Concurrency, tt.want)
+			}
+		})
+	}
 }
 
 func TestLoadBaseURLDefault(t *testing.T) {

@@ -3,6 +3,7 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -26,6 +27,7 @@ import (
 	"github.com/gametimesf/open-trove/storage"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"golang.org/x/sync/errgroup"
 )
 
 type server struct {
@@ -42,6 +44,8 @@ type server struct {
 	uploads       uploadLimits
 	intake        intake.Inspector // intake.NoOp{} when feature disabled
 	intakeFail    intake.FailMode  // closed (default) or open
+	// intakeConcurrency is how many files of one site are inspected at once.
+	intakeConcurrency int
 	// intn returns a random int in [0, n); injected so favicon selection is testable.
 	intn func(n int) int
 	// identity resolves each request's principal; see docs/authentication.md.
@@ -753,7 +757,7 @@ func (s *server) handleSiteUploadFromZip(c echo.Context, slug string, zipBytes [
 		}
 	}
 
-	// Two-pass: read-and-inspect everything before persisting anything.
+	// Read and inspect everything before persisting anything.
 	// If any file is rejected, we leave the store untouched.
 	type pendingFile struct {
 		path        string
@@ -798,12 +802,21 @@ func (s *server) handleSiteUploadFromZip(c echo.Context, slug string, zipBytes [
 			return c.JSON(http.StatusRequestEntityTooLarge, map[string]string{"error": "expanded ZIP is too large"})
 		}
 		ct := detectContentType(storedPath, bytes.NewReader(data), "")
-		if err := s.gateUpload(c, storedPath, ct, data); err != nil {
-			// gateUpload already wrote the response. Abort the whole site
-			// upload — first violation kills it before anything is stored.
-			return err
-		}
 		pending = append(pending, pendingFile{path: storedPath, contentType: ct, data: data})
+	}
+
+	// Inspect files concurrently: one at a time, a large site outlasts the
+	// load balancer's request timeout. The first violation cancels the rest
+	// and aborts the upload before anything is stored.
+	g, gctx := errgroup.WithContext(r.Context())
+	g.SetLimit(max(s.intakeConcurrency, 1))
+	for _, pf := range pending {
+		g.Go(func() error {
+			return s.inspectUpload(gctx, pf.path, pf.contentType, pf.data)
+		})
+	}
+	if err := writeIntakeRejection(c, g.Wait()); err != nil {
+		return err
 	}
 
 	fileCount := 0
@@ -1025,6 +1038,18 @@ func viewMode(contentType, filename string) string {
 // committed.
 var errIntakeAborted = errors.New("intake: response already written")
 
+// errIntakeUnavailable reports an inspector failure when intake fails closed.
+var errIntakeUnavailable = errors.New("intake: inspection unavailable")
+
+// intakeBlockedError is a content-policy rejection of one file.
+type intakeBlockedError struct {
+	verdict *intake.Verdict
+}
+
+func (e *intakeBlockedError) Error() string {
+	return "intake: blocked: " + e.verdict.Reason
+}
+
 // gateUpload runs the intake inspector against a file and either:
 //   - returns nil (allowed → caller proceeds with persisting)
 //   - writes a 403 JSON response and returns errIntakeAborted (blocked)
@@ -1036,39 +1061,67 @@ var errIntakeAborted = errors.New("intake: response already written")
 // without persisting anything; the response has already been written
 // when the error is non-nil.
 func (s *server) gateUpload(c echo.Context, filename, contentType string, body []byte) error {
+	return writeIntakeRejection(c, s.inspectUpload(c.Request().Context(), filename, contentType, body))
+}
+
+// inspectUpload runs the intake inspector against one file without writing
+// a response, so it is safe to call concurrently. It returns nil when the
+// file may be stored, an *intakeBlockedError when policy rejects it, and
+// errIntakeUnavailable (or the context's error) when it couldn't be checked.
+func (s *server) inspectUpload(ctx context.Context, filename, contentType string, body []byte) error {
 	if s.intake == nil {
 		// Defensive — main wiring guarantees a non-nil inspector (NoOp
 		// when disabled), but if a caller constructs a server directly
 		// without it, treat as no gate.
 		return nil
 	}
-	verdict, err := s.intake.Inspect(c.Request().Context(), intake.Input{
+	if err := ctx.Err(); err != nil {
+		// The request is gone or another file already failed.
+		return err
+	}
+	verdict, err := s.intake.Inspect(ctx, intake.Input{
 		Filename:    filename,
 		ContentType: contentType,
 		Body:        body,
 	})
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		log.Printf("ERROR intake inspection filename=%q content_type=%q: %v", filename, contentType, err)
 		if s.intakeFail == intake.FailOpen {
 			log.Printf("WARN  intake fail-open: allowing upload despite inspector error filename=%q", filename)
 			return nil
 		}
-		_ = c.JSON(http.StatusServiceUnavailable, map[string]string{
-			"error": "upload inspection unavailable, please retry",
-		})
-		return errIntakeAborted
+		return errIntakeUnavailable
 	}
 	if !verdict.Allowed {
 		log.Printf("INFO  intake blocked filename=%q content_type=%q reason=%q categories=%v",
 			filename, contentType, verdict.Reason, verdict.Categories)
-		_ = c.JSON(http.StatusForbidden, map[string]any{
-			"error":      verdict.Reason,
-			"categories": verdict.Categories,
-		})
-		return errIntakeAborted
+		return &intakeBlockedError{verdict: verdict}
 	}
 	log.Printf("INFO  intake allowed filename=%q content_type=%q", filename, contentType)
 	return nil
+}
+
+// writeIntakeRejection writes the response for a failed inspection and
+// returns errIntakeAborted. It returns nil when err is nil.
+func writeIntakeRejection(c echo.Context, err error) error {
+	if err == nil {
+		return nil
+	}
+	var blocked *intakeBlockedError
+	if errors.As(err, &blocked) {
+		_ = c.JSON(http.StatusForbidden, map[string]any{
+			"error":      blocked.verdict.Reason,
+			"categories": blocked.verdict.Categories,
+		})
+		return errIntakeAborted
+	}
+	_ = c.JSON(http.StatusServiceUnavailable, map[string]string{
+		"error": "upload inspection unavailable, please retry",
+	})
+	return errIntakeAborted
 }
 
 func renderError(c echo.Context, code int, message string) error {
