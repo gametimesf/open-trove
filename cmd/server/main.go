@@ -38,6 +38,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("initializing upload intake: %v", err)
 	}
+	inspector = intake.WithCache(inspector, store)
 
 	commentOptions, err := startSlack(ctx, cfg.Slack, cfg.BaseURL, store)
 	if err != nil {

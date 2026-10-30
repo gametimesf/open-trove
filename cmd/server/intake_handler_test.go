@@ -355,3 +355,48 @@ func TestInternalSlugsAreNotServed(t *testing.T) {
 		}
 	}
 }
+
+// fingerprintedInspector allows everything, counts inspections by filename
+// and reports a fixed policy fingerprint so its verdicts can be cached.
+type fingerprintedInspector struct {
+	mu       sync.Mutex
+	inspects map[string]int
+}
+
+func (f *fingerprintedInspector) Inspect(_ context.Context, in intake.Input) (*intake.Verdict, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.inspects[in.Filename]++
+	return &intake.Verdict{Allowed: true}, nil
+}
+
+func (f *fingerprintedInspector) Fingerprint(context.Context) (string, error) {
+	return "policy", nil
+}
+
+func TestSiteReuploadInspectsOnlyChangedFiles(t *testing.T) {
+	srv, store := newTestServer()
+	insp := &fingerprintedInspector{inspects: map[string]int{}}
+	srv.intake = intake.WithCache(insp, store)
+	e := newTestEcho(srv)
+
+	upload := func(files map[string]string) {
+		t.Helper()
+		req := createUploadRequest(t, "site.zip", buildZip(t, files), "cached-site")
+		req.URL.RawQuery = "overwrite=true"
+		w := httptest.NewRecorder()
+		e.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+	}
+	upload(map[string]string{"index.html": "<p>home</p>", "about.html": "<p>about</p>"})
+	upload(map[string]string{"index.html": "<p>home, edited</p>", "about.html": "<p>about</p>"})
+
+	if insp.inspects["index.html"] != 2 {
+		t.Errorf("changed index.html inspected %d times, want 2", insp.inspects["index.html"])
+	}
+	if insp.inspects["about.html"] != 1 {
+		t.Errorf("unchanged about.html inspected %d times, want 1", insp.inspects["about.html"])
+	}
+}

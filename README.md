@@ -165,6 +165,11 @@ Every file in a ZIP site is inspected before anything is stored, up to
 `concurrency` files at a time. Raise it for large sites if your Anthropic rate
 limits allow; keep it low enough that one upload can't exhaust them.
 
+Files the inspector allows are remembered by a hash of their name, type and
+content together with the model and guidance, so re-uploading a file or site
+only inspects what changed. Changing the model or guidance re-inspects
+everything; blocked files are never cached.
+
 When Anthropic intake is enabled, provide `ANTHROPIC_API_KEY` through your
 secret manager. Guidance can come from `prompt_inline`, `prompt_path`, or the
 S3 `prompt_source_bucket` and `prompt_source_key` fields. Do not commit secrets
@@ -253,6 +258,7 @@ Trove keeps the established S3 object layout:
 - site files at `<slug>/<path>`
 - browser activity at `_users/<id>.json`
 - comments at `_comments/<slug>/<id>.json`
+- allowed intake verdicts at `_intake/<hash>` (empty markers)
 
 Upgrading from an existing Trove deployment does not require a data migration.
 

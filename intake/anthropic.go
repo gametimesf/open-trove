@@ -3,7 +3,9 @@ package intake
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -90,6 +92,19 @@ func (a *AnthropicInspector) currentGuidance(ctx context.Context) string {
 		return a.cfg.Guidance
 	}
 	return ""
+}
+
+// Fingerprint identifies everything besides the input that decides a
+// verdict: the model, the current guidance, the request shape, the API
+// version and the input size limit. Cached verdicts from an older policy
+// stop matching as soon as any of them change.
+func (a *AnthropicInspector) Fingerprint(ctx context.Context) (string, error) {
+	raw, err := json.Marshal(a.buildRequest(ctx, "", contentBlock{}))
+	if err != nil {
+		return "", fmt.Errorf("%w: fingerprint: %v", ErrInspector, err)
+	}
+	sum := sha256.Sum256(fmt.Appendf(raw, "|version=%s|max_bytes=%d", anthropicVersion, a.cfg.MaxBytes))
+	return hex.EncodeToString(sum[:]), nil
 }
 
 // Inspect runs the configured guidance over the input and returns a Verdict.
