@@ -5,11 +5,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/gametimesf/open-trove/intake"
 	"github.com/gametimesf/open-trove/storage"
@@ -189,6 +192,135 @@ func TestSiteUploadInspectorBlocksFirstViolatingFile(t *testing.T) {
 	// Site upload should have been aborted — no manifest persisted.
 	if exists, _ := store.HeadSite(context.Background(), "test-site"); exists {
 		t.Error("blocked site upload was persisted")
+	}
+}
+
+func TestSiteUploadInspectsFilesConcurrently(t *testing.T) {
+	const limit = 3
+	srv, store := newTestServer()
+	srv.intakeConcurrency = limit
+
+	// Every call waits until `limit` calls are in flight at once, so a
+	// sequential gate would time out instead of filling the pool.
+	var mu sync.Mutex
+	inFlight, peak := 0, 0
+	full := make(chan struct{})
+	srv.intake = inspectorFunc(func(ctx context.Context, _ intake.Input) (*intake.Verdict, error) {
+		mu.Lock()
+		inFlight++
+		peak = max(peak, inFlight)
+		if inFlight == limit {
+			select {
+			case <-full:
+			default:
+				close(full)
+			}
+		}
+		mu.Unlock()
+		defer func() {
+			mu.Lock()
+			inFlight--
+			mu.Unlock()
+		}()
+		select {
+		case <-full:
+		case <-time.After(2 * time.Second):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		return &intake.Verdict{Allowed: true}, nil
+	})
+	e := newTestEcho(srv)
+
+	files := map[string]string{"index.html": "<html>home</html>"}
+	for i := range 2 * limit {
+		files[fmt.Sprintf("page%d.html", i)] = "<html>page</html>"
+	}
+	req := createUploadRequest(t, "site.zip", buildZip(t, files), "parallel-site")
+	w := httptest.NewRecorder()
+	e.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if peak != limit {
+		t.Errorf("peak concurrent inspections = %d, want %d", peak, limit)
+	}
+	if exists, _ := store.HeadSite(context.Background(), "parallel-site"); !exists {
+		t.Error("site was not stored")
+	}
+}
+
+func TestSiteUploadRejectionCancelsOtherInspections(t *testing.T) {
+	tests := []struct {
+		name     string
+		failMode intake.FailMode
+		bad      func() (*intake.Verdict, error)
+		wantCode int
+		wantBody string
+	}{
+		{
+			name:     "blocked file",
+			failMode: intake.FailClosed,
+			bad: func() (*intake.Verdict, error) {
+				return &intake.Verdict{Allowed: false, Reason: "test marker"}, nil
+			},
+			wantCode: http.StatusForbidden,
+			wantBody: "test marker",
+		},
+		{
+			name:     "inspector error fails closed",
+			failMode: intake.FailClosed,
+			bad: func() (*intake.Verdict, error) {
+				return nil, errors.New("boom")
+			},
+			wantCode: http.StatusServiceUnavailable,
+			wantBody: "inspection unavailable",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv, store := newTestServer()
+			srv.intakeConcurrency = 4
+			srv.intakeFail = tt.failMode
+			// Good files wait until the bad one cancels them.
+			srv.intake = inspectorFunc(func(ctx context.Context, in intake.Input) (*intake.Verdict, error) {
+				if strings.Contains(string(in.Body), "BLOCKME") {
+					return tt.bad()
+				}
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(5 * time.Second):
+					return &intake.Verdict{Allowed: true}, nil
+				}
+			})
+			e := newTestEcho(srv)
+
+			zipBytes := buildZip(t, map[string]string{
+				"index.html": "<html>fine</html>",
+				"a.html":     "<html>fine</html>",
+				"b.html":     "<html>BLOCKME</html>",
+				"c.html":     "<html>fine</html>",
+			})
+			req := createUploadRequest(t, "site.zip", zipBytes, "rejected-site")
+			start := time.Now()
+			w := httptest.NewRecorder()
+			e.ServeHTTP(w, req)
+
+			if w.Code != tt.wantCode {
+				t.Fatalf("expected %d, got %d: %s", tt.wantCode, w.Code, w.Body.String())
+			}
+			if !strings.Contains(w.Body.String(), tt.wantBody) {
+				t.Errorf("body = %q, want it to contain %q", w.Body.String(), tt.wantBody)
+			}
+			if elapsed := time.Since(start); elapsed > 2*time.Second {
+				t.Errorf("upload took %s; other inspections were not canceled", elapsed)
+			}
+			if exists, _ := store.HeadSite(context.Background(), "rejected-site"); exists {
+				t.Error("rejected site upload was persisted")
+			}
+		})
 	}
 }
 
