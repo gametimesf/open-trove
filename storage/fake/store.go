@@ -34,6 +34,7 @@ type Store struct {
 	comments  map[string][]comments.Comment
 	tokens    map[string]auth.Token
 	cards     map[string]preview.Card
+	verdicts  map[string]struct{}
 }
 
 // NewStore creates a ready-to-use fake Store.
@@ -44,6 +45,7 @@ func NewStore() *Store {
 		comments:  make(map[string][]comments.Comment),
 		tokens:    make(map[string]auth.Token),
 		cards:     make(map[string]preview.Card),
+		verdicts:  make(map[string]struct{}),
 	}
 }
 

@@ -311,3 +311,40 @@ func TestInspectTruncatesOversizedBody(t *testing.T) {
 		t.Fatalf("Inspect: %v", err)
 	}
 }
+
+func TestFingerprintTracksPolicy(t *testing.T) {
+	guidance := "policy one"
+	newInspector := func(model string) *AnthropicInspector {
+		insp, err := NewAnthropic(AnthropicConfig{
+			APIKey: "k",
+			Model:  model,
+			PromptSource: FetcherFunc(func(context.Context) ([]byte, error) {
+				return []byte(guidance), nil
+			}),
+		})
+		if err != nil {
+			t.Fatalf("NewAnthropic: %v", err)
+		}
+		return insp
+	}
+	fingerprint := func(insp *AnthropicInspector) string {
+		fp, err := insp.Fingerprint(context.Background())
+		if err != nil {
+			t.Fatalf("Fingerprint: %v", err)
+		}
+		return fp
+	}
+
+	base := newInspector("model-a")
+	first := fingerprint(base)
+	if again := fingerprint(base); again != first {
+		t.Errorf("fingerprint changed without a policy change: %s then %s", first, again)
+	}
+	if other := fingerprint(newInspector("model-b")); other == first {
+		t.Error("fingerprint ignored the model")
+	}
+	guidance = "policy two"
+	if changed := fingerprint(base); changed == first {
+		t.Error("fingerprint ignored the guidance")
+	}
+}
