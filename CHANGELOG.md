@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.15.0](https://github.com/gametimesf/open-trove/compare/open-trove-v1.14.1...open-trove-v1.15.0) (2026-10-30)
+
+
+### Features
+
+* remember allowed intake verdicts so re-uploads only inspect changes ([#58](https://github.com/gametimesf/open-trove/issues/58)) ([6d2b7be](https://github.com/gametimesf/open-trove/commit/6d2b7beb1373fbc5d0d1375a59157958925ad78b))
+
+
+### Bug Fixes
+
+* inspect site files concurrently so large ZIP uploads finish ([#57](https://github.com/gametimesf/open-trove/issues/57)) ([09893e0](https://github.com/gametimesf/open-trove/commit/09893e055c7c4cbbcf2392c425820d375df795e2))
+
 ## [1.14.1](https://github.com/gametimesf/open-trove/compare/open-trove-v1.14.0...open-trove-v1.14.1) (2026-10-29)
 
 
