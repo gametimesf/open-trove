@@ -194,7 +194,8 @@ endpoint; it is out of scope for this phase.
 ## Preparing for sharing and access control
 
 Per-artifact access control (share with a person or a group, private
-artifacts) is the next design, not this one. This phase keeps it possible:
+artifacts) is the next design, proposed in [sharing.md](sharing.md). This phase
+keeps it possible:
 
 - **Groups.** Identity proxies can put group membership in the signed token
   (for example an Okta groups claim forwarded by Cloudflare Access). When
