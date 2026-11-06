@@ -16,7 +16,8 @@ an `Inspector`; disabled deployments receive a no-op implementation.
 ## Request flow
 
 1. Identity middleware normalizes the asserted email and requires it for writes.
-   Verified identity sources are proposed in [docs/authentication.md](docs/authentication.md).
+   Verified identity sources are proposed in [docs/authentication.md](docs/authentication.md),
+   and per-artifact sharing in [docs/sharing.md](docs/sharing.md).
 2. Upload handlers bound request size and ZIP expansion before persistence.
 3. The configured intake inspector accepts, flags, or rejects the content.
 4. The storage adapter writes the artifact/site and attribution record.
