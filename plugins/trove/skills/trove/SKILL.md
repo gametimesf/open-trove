@@ -31,8 +31,9 @@ comments, MCP) and wins over anything here.
 - `X-Trove-Client: trove-plugin/0.1.0`
 - `X-Trove-User-Email: <the user's email>`: from `$TROVE_USER_EMAIL`, else
   `git config user.email`; use it without asking and say which one you used.
-  Ask only when neither exists. Required for writes; Trove uses it for
-  attribution, not access.
+  Ask only when neither exists. Trove uses it for attribution, not access.
+  If the user would rather not share an email, leave it out: servers that
+  verify sign-in (an identity proxy or `TROVE_TOKEN`) accept writes without it.
 - `Authorization: Bearer $TROVE_TOKEN`, when that is set.
 
 If a request is redirected to a login page or returns 401, the server sits
