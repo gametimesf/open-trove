@@ -1,0 +1,11 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "trove",
+  "version": "0.1.0",
+  "description": "Share files and pages through a Trove server: upload, get a link, read and reply to comments.",
+  "author": { "name": "Gametime United, Inc.", "url": "https://github.com/gametimesf" },
+  "homepage": "https://github.com/gametimesf/open-trove",
+  "repository": "https://github.com/gametimesf/open-trove",
+  "license": "MIT",
+  "keywords": ["trove", "file-sharing", "artifacts"]
+}

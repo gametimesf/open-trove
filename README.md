@@ -249,6 +249,22 @@ Discovery surfaces:
 - `GET /openapi.json`
 - `GET /swagger/`
 
+## Agent plugin
+
+`plugins/trove` teaches coding agents to use a Trove server: find it, read its
+`/llms.txt`, upload, share the link, update safely, and work with comments. It
+is one [Agent Skill](https://agentskills.io) packaged as an
+[Agent Plugin](https://agent-plugins.org). Point it at your server with
+`TROVE_BASE_URL` (optional: `TROVE_USER_EMAIL`, `TROVE_TOKEN`), or give the
+agent a Trove link.
+
+- Claude Code: `/plugin marketplace add gametimesf/open-trove`, then
+  `/plugin install trove@open-trove`
+- Codex: `codex plugin marketplace add gametimesf/open-trove`, then install
+  Trove from the plugin browser
+- OpenCode and other Agent Skills clients: copy
+  `plugins/trove/skills/trove/` into `~/.agents/skills/`
+
 ## Storage compatibility
 
 Trove keeps the established S3 object layout:

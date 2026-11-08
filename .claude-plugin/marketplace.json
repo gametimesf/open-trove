@@ -1,0 +1,13 @@
+{
+  "name": "open-trove",
+  "description": "Agent plugin for Trove: share files and pages through a Trove server.",
+  "owner": { "name": "Gametime United, Inc." },
+  "plugins": [
+    {
+      "name": "trove",
+      "source": "./plugins/trove",
+      "description": "Share files and pages through a Trove server: upload, get a link, read and reply to comments.",
+      "version": "0.1.0"
+    }
+  ]
+}

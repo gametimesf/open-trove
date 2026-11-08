@@ -46,6 +46,32 @@ jobs:
       - name: Verify default and customized Docker images
         run: ./scripts/test-image-guide.sh
 
+  plugin:
+    name: Agent plugin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+        with:
+          enable-cache: false
+
+      - name: Agent Plugins manifest
+        run: uvx check-jsonschema --schemafile https://agent-plugins.org/schemas/1.0.0/plugin.schema.json plugins/trove/plugin.json
+
+      - name: Agent Skills
+        run: uvx --from skills-ref agentskills validate plugins/trove/skills/trove
+
+      - name: Claude Code plugin and marketplace
+        run: |
+          npx -y @anthropic-ai/claude-code@2.1.319 plugin validate .
+          npx -y @anthropic-ai/claude-code@2.1.319 plugin validate plugins/trove
+
+      - name: One version everywhere
+        run: |
+          v=$(jq -r .version plugins/trove/plugin.json)
+          test "$v" = "$(jq -r '.plugins[] | select(.name == "trove") | .version' .claude-plugin/marketplace.json)"
+          grep -q "trove-plugin/$v" plugins/trove/skills/trove/SKILL.md
+
   security:
     name: Security
     runs-on: ubuntu-latest
